@@ -10,8 +10,8 @@ Each item shows the milestone that closes it.
 
 ### Basic — "It Talks to Your Docs"
 
-- [ ] Web chat UI → **M1**
-- [ ] Streamed LLM responses → **M1**
+- [x] Web chat UI → **M1**
+- [x] Streamed LLM responses → **M1**
 - [ ] RAG over the domain documents → **M2 + M3**
 - [ ] Source citations next to answers → **M3**
 - [ ] 5+ seed questions give useful, accurate answers → **M3**
@@ -44,7 +44,7 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 
 - [ ] Live URL works → **M4**
 - [ ] LLM API key is server-side only, never in the browser → **M1** (design), **M4** (verified)
-- [ ] Hard billing limit set on the LLM provider → **M1** (before the first call)
+- [ ] Hard billing limit on the LLM provider: billing not connected (free tier) → **M1**
 - [ ] Rate limit + auth in place (no anonymous unlimited use) → **M5**
 - [ ] Streaming works in production → **M4**
 - [ ] Mobile UI works → **M5**
@@ -66,7 +66,7 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 **Definition of Done**
 - A question typed in the browser → the answer streams in word by word.
 - API key only in `.env`; `.env.example` committed with empty values.
-- Spend limit set on the Gemini account.
+- Billing is not connected to the Gemini account (free tier) — no way to be charged.
 - Tests: provider selection from settings, chat endpoint with a fake provider. `ruff` + `pytest` green.
 
 ### M2 — Data
@@ -171,7 +171,7 @@ Answers are filled in at the end of the lab.
 | # | Risk | Mitigation |
 |---|---|---|
 | 1 | Render free tier has 512 MB RAM; the question is embedded on the server at runtime. PyTorch-based models may not fit. | fastembed (ONNX) instead of sentence-transformers; measure memory in M4. |
-| 2 | Gemini free tier: rate limits; prompts may be used for training. | Spend limit, backoff on 429, never send private data; second provider behind the same interface. |
+| 2 | Gemini free tier: rate limits; prompts may be used for training. | No billing attached (free tier), backoff on 429, never send private data; second provider behind the same interface. |
 | 3 | Bad similarity threshold: too high → "I don't know" on valid questions, too low → hallucinations. | Tune on the eval set; log top scores per question. |
 | 4 | Render free service sleeps → slow first request during a demo. | Warm it up before the defense; note it in the README. |
 | 5 | Scope creep: M6–M7 are large. | Reach Standard (M5) first; Advanced only after M5 is green. |

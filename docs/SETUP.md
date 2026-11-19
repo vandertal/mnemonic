@@ -41,7 +41,7 @@ VS Code extensions: `ms-python.python`, `charliermarsh.ruff`, `anthropic.claude-
 |---|---|---|
 | GitHub | Code, CI | ✅ |
 | Claude Pro | Claude Code | ✅ |
-| LLM API provider | RAG answers (lab 31) — set a hard spend limit ($10) first | ⏳ lab 31 |
+| LLM API provider (Gemini) | RAG answers (lab 31) — free tier, billing not connected | ⏳ lab 31 |
 | Neon | Postgres + pgvector | ⏳ lab 31 |
 | Render | Backend hosting | ⏳ lab 31 |
 | Vercel / Netlify | Frontend hosting | ⏳ lab 22 |

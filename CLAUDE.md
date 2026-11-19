@@ -71,7 +71,8 @@ Filled in as the project grows.
 
 ```powershell
 # backend (from lab 31)
-# cd backend; uv run fastapi dev
-# uv run pytest
-# uv run ruff check . ; uv run ruff format .
+cd backend
+uv run fastapi dev src/mnemonic/main.py   # http://127.0.0.1:8000
+uv run pytest
+uv run ruff check . ; uv run ruff format .
 ```
