@@ -1,0 +1,19 @@
+[
+  {"question": "How do I declare a query parameter with validation?",
+   "expected_file": "tutorial/query-params-str-validations.md", "keywords": ["Query", "min_length"]},
+  {"question": "How do I add OAuth2 password authentication with JWT tokens?",
+   "expected_file": "tutorial/security/oauth2-jwt.md", "keywords": ["JWT", "hash"]},
+  {"question": "How do I run a background task after returning a response?",
+   "expected_file": "tutorial/background-tasks.md", "keywords": ["BackgroundTasks", "add_task"]},
+  {"question": "How do I enable CORS in FastAPI?",
+   "expected_file": "tutorial/cors.md", "keywords": ["CORSMiddleware", "allow_origins"]},
+  {"question": "How do I define a request body with a Pydantic model?",
+   "expected_file": "tutorial/body.md", "keywords": ["BaseModel", "Pydantic"]},
+  {"question": "How do I upload a file in FastAPI?",
+   "expected_file": "tutorial/request-files.md", "keywords": ["UploadFile", "File"]},
+  {"question": "How do I return an error response with a custom status code using HTTPException?",
+   "expected_file": "tutorial/handling-errors.md", "keywords": ["HTTPException", "detail"]},
+  {"question": "How do I write a Django view that renders a template?", "expect_idk": true},
+  {"question": "How do I cook a vegetarian lasagna?", "expect_idk": true},
+  {"question": "Who won the 2022 FIFA World Cup?", "expect_idk": true}
+]
