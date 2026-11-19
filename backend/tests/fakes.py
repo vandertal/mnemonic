@@ -39,7 +39,7 @@ class RecordingProvider:
         self.answer = answer
         self.calls: list[list[Message]] = []
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message], usage=None) -> AsyncIterator[str]:
         self.calls.append(messages)
         yield self.answer
 

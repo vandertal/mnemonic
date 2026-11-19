@@ -17,6 +17,11 @@ def build_provider(settings: Settings) -> LLMProvider:
             raise ValueError(f"Unknown LLM_PROVIDER: {other!r}")
 
 
+def model_name(settings: Settings) -> str:
+    """Model recorded in the LLM call log."""
+    return settings.gemini_model if settings.llm_provider == "gemini" else settings.llm_provider
+
+
 def describe_provider(settings: Settings) -> str:
     """Human-readable provider + model for the startup log. Never includes the API key."""
     if settings.llm_provider == "gemini":

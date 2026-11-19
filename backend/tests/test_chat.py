@@ -22,13 +22,13 @@ def chat_body(text: str, session_id: uuid.UUID = SESSION) -> dict:
 
 
 class ScriptedProvider:
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message], usage=None) -> AsyncIterator[str]:
         yield "Hello"
         yield " wor\nld"
 
 
 class BrokenProvider:
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message], usage=None) -> AsyncIterator[str]:
         yield "partial"
         raise RuntimeError("boom")
 
@@ -36,7 +36,7 @@ class BrokenProvider:
 class HangingProvider:
     """Never sends a token — like a model stuck in an overloaded queue."""
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message], usage=None) -> AsyncIterator[str]:
         await asyncio.Event().wait()
         yield "never"
 
@@ -44,7 +44,7 @@ class HangingProvider:
 class StallingProvider:
     """Sends one token, then goes silent."""
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message], usage=None) -> AsyncIterator[str]:
         yield "first"
         await asyncio.Event().wait()
 

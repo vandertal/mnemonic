@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 10
     global_rpm: int = 5
 
+    # Price of one million tokens in USD, for the cost estimate in the LLM call log. Take the
+    # numbers from the provider's pricing page; 0 (the free tier) logs a cost of 0.
+    price_in_per_m: float = 0.0
+    price_out_per_m: float = 0.0
+
     llm_provider: str = "fake"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"

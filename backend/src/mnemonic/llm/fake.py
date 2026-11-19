@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+from mnemonic.llm.base import Usage
 from mnemonic.schemas import Message
 
 
@@ -10,7 +11,9 @@ class FakeProvider:
     def __init__(self, delay: float = 0.0) -> None:
         self._delay = delay
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(
+        self, messages: list[Message], usage: Usage | None = None
+    ) -> AsyncIterator[str]:
         last = messages[-1].content
         for word in f"Echo: {last}".split(" "):
             if self._delay:

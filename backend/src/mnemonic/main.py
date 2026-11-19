@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -13,8 +14,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
 from mnemonic.limits import SlidingWindowLimiter
-from mnemonic.llm.base import LLMProvider
-from mnemonic.llm.factory import build_provider, describe_provider
+from mnemonic.llm.base import LLMProvider, Usage
+from mnemonic.llm.factory import build_provider, describe_provider, model_name
+from mnemonic.llm.retry import stream_with_retry
 from mnemonic.rag import REFUSAL, build_messages, valid_citations
 from mnemonic.retrieval import Hit, PgRetriever, Retriever
 from mnemonic.schemas import ChatRequest, ClientMessage, Message
@@ -24,7 +26,7 @@ from mnemonic.security import (
     require_api_key,
     spend_llm_budget,
 )
-from mnemonic.store import PgStore, Store
+from mnemonic.store import LLMCall, PgStore, Store
 
 # uvicorn configures only its own loggers; without this our INFO lines would be dropped.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -82,17 +84,61 @@ async def refusal_stream(store: Store, session_id: UUID) -> AsyncIterator[str]:
     yield sse("", event="done")
 
 
+async def log_llm_call(
+    store: Store,
+    settings: Settings,
+    session_id: UUID,
+    messages: list[Message],
+    answer: str,
+    usage: Usage,
+    retries: int,
+    latency_ms: int,
+    ok: bool,
+) -> None:
+    """Write one row to llm_calls. Never raises: a broken log must not break the answer."""
+    # Providers report real token counts; if one did not, estimate: ~4 characters per token.
+    estimated = usage.tokens_in is None or usage.tokens_out is None
+    tokens_in = usage.tokens_in
+    if tokens_in is None:
+        tokens_in = sum(len(m.content) for m in messages) // 4
+    tokens_out = usage.tokens_out if usage.tokens_out is not None else len(answer) // 4
+    cost = (tokens_in * settings.price_in_per_m + tokens_out * settings.price_out_per_m) / 1e6
+    status = "error" if not ok else "retried" if retries else "ok"
+    call = LLMCall(
+        session_id=session_id,
+        model=model_name(settings),
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cost_usd=cost,
+        latency_ms=latency_ms,
+        status=status + ("+est" if estimated else ""),
+    )
+    try:
+        await asyncio.to_thread(store.log_llm_call, call)
+    except Exception:
+        logger.exception("could not write the LLM call log")
+
+
 async def event_stream(
     provider: LLMProvider,
     messages: list[Message],
     hits: list[Hit],
-    timeout: float,
+    settings: Settings,
     store: Store,
     session_id: UUID,
 ) -> AsyncIterator[str]:
+    timeout = settings.llm_timeout_seconds
+    usage, retries = Usage(), 0
+
+    def count_retry() -> None:
+        nonlocal retries
+        retries += 1
+
     # By the time a token fails, HTTP 200 is already sent — report errors as an event.
-    tokens = provider.stream(messages)
+    tokens = stream_with_retry(provider, messages, usage, on_retry=count_retry)
     answer: list[str] = []
+    error: str | None = None
+    started = time.perf_counter()
     try:
         while True:
             # Idle timeout: applies to every wait, so a model that never starts
@@ -106,21 +152,32 @@ async def event_stream(
             yield sse(token)
     except TimeoutError:
         logger.warning("LLM provider sent nothing for %.1fs, giving up", timeout)
-        yield sse(
+        error = (
             f"The model did not respond within {timeout:g} seconds. "
-            "It may be overloaded — please try again.",
-            event="error",
+            "It may be overloaded — please try again."
         )
-        return
     except Exception:
         logger.exception("LLM provider failed mid-stream")
-        yield sse("The model failed to answer. Please try again.", event="error")
-        return
+        error = "The model failed to answer. Please try again."
     finally:
         # Stop the provider's generator so its HTTP request is closed too.
-        aclose = getattr(tokens, "aclose", None)
-        if aclose:
-            await aclose()
+        await tokens.aclose()
+    # Not reached when the client disconnects (the generator is closed at a `yield`): such
+    # calls are not logged.
+    await log_llm_call(
+        store,
+        settings,
+        session_id,
+        messages,
+        "".join(answer),
+        usage,
+        retries,
+        round((time.perf_counter() - started) * 1000),
+        ok=error is None,
+    )
+    if error:
+        yield sse(error, event="error")
+        return
     # Only citations that point to really retrieved chunks reach the client.
     sources = [
         {"id": h.id, "file_path": h.file_path, "heading": h.heading, "similarity": h.similarity}
@@ -162,9 +219,7 @@ async def chat(
     else:
         # For now the model sees only the current question; conversation memory is M6.
         messages = build_messages([ClientMessage(role="user", content=request.message)], hits)
-        body = event_stream(
-            provider, messages, hits, settings.llm_timeout_seconds, store, request.session_id
-        )
+        body = event_stream(provider, messages, hits, settings, store, request.session_id)
     return StreamingResponse(
         body,
         media_type="text/event-stream",
