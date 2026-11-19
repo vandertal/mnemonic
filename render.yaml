@@ -1,0 +1,27 @@
+# Render Blueprint. Secrets and per-environment values are NOT stored here:
+# `sync: false` means "ask for the value in the Render dashboard".
+services:
+  - type: web
+    name: mnemonic
+    runtime: python
+    plan: free
+    rootDir: backend
+    # 1) install locked, non-dev dependencies into backend/.venv
+    # 2) download the embedding model into the cache dir below, so the running service
+    #    never downloads it (the project dir survives from build to run, /tmp does not)
+    buildCommand: >-
+      uv sync --frozen --no-dev &&
+      uv run --no-sync python -c "from mnemonic.ingest.embedder import embed_query; embed_query('warmup')"
+    startCommand: .venv/bin/uvicorn mnemonic.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: FASTEMBED_CACHE_PATH
+        value: /opt/render/project/src/backend/.cache/fastembed
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false

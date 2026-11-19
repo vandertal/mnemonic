@@ -15,3 +15,10 @@ def build_provider(settings: Settings) -> LLMProvider:
             return GeminiProvider(settings.gemini_api_key, settings.gemini_model)
         case other:
             raise ValueError(f"Unknown LLM_PROVIDER: {other!r}")
+
+
+def describe_provider(settings: Settings) -> str:
+    """Human-readable provider + model for the startup log. Never includes the API key."""
+    if settings.llm_provider == "gemini":
+        return f"gemini (model: {settings.gemini_model})"
+    return settings.llm_provider

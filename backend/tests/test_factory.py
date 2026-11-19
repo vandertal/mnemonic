@@ -1,7 +1,7 @@
 import pytest
 
 from mnemonic.config import Settings
-from mnemonic.llm.factory import build_provider
+from mnemonic.llm.factory import build_provider, describe_provider
 from mnemonic.llm.fake import FakeProvider
 from mnemonic.llm.gemini import GeminiProvider
 
@@ -27,3 +27,14 @@ def test_gemini_without_key_fails():
 def test_unknown_provider_fails():
     with pytest.raises(ValueError, match="Unknown LLM_PROVIDER"):
         build_provider(make_settings(llm_provider="nope"))
+
+
+def test_describe_provider_has_model_but_no_key():
+    settings = make_settings(llm_provider="gemini", gemini_api_key="secret-key", gemini_model="m1")
+    text = describe_provider(settings)
+    assert "gemini" in text and "m1" in text
+    assert "secret-key" not in text
+
+
+def test_describe_provider_fake():
+    assert describe_provider(make_settings(llm_provider="fake")) == "fake"

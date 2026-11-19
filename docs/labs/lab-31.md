@@ -159,6 +159,16 @@ Live run (real Gemini + Neon, 5 on-topic + 3 off-domain):
 - Render web service; secrets as environment variables; public URL.
 - Log the active LLM provider and model at startup (never the key).
 
+Prepared (not closed until the service is live):
+
+- `render.yaml` Blueprint (root `backend`, free plan, uv build, uvicorn on `$PORT`); secrets are `sync: false`.
+- Startup log `LLM provider: gemini (model: ...)` added (it was not in M1). `logging.basicConfig(INFO)` too:
+  before, our `logger.info` lines were silently dropped under uvicorn.
+- Embedding model is downloaded at build time into `backend/.cache/fastembed` (`FASTEMBED_CACHE_PATH`),
+  because the default `/tmp` cache is lost on restart. Model size: ~65 MB.
+- Memory measured locally: ~250 MB with the model loaded, peak ~280 MB. Still to confirm in Render Metrics.
+- Secret scan (tracked files, git history, served page): clean.
+
 **Definition of Done**
 - The startup log shows which provider and model the live service uses.
 - Streaming works on the live URL.

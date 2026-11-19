@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -11,16 +12,25 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
 from mnemonic.llm.base import LLMProvider
-from mnemonic.llm.factory import build_provider
+from mnemonic.llm.factory import build_provider, describe_provider
 from mnemonic.rag import REFUSAL, build_messages, valid_citations
 from mnemonic.retrieval import Hit, PgRetriever, Retriever
 from mnemonic.schemas import ChatRequest, Message
 
+# uvicorn configures only its own loggers; without this our INFO lines would be dropped.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="Mnemonic")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    logger.info("LLM provider: %s", describe_provider(get_settings()))
+    yield
+
+
+app = FastAPI(title="Mnemonic", lifespan=lifespan)
 
 
 @lru_cache
