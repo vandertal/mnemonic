@@ -1,7 +1,10 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from uuid import UUID
 
 from mnemonic.retrieval import Hit
 from mnemonic.schemas import Message
+from mnemonic.store import LLMCall, StoredMessage
 
 
 def make_hit(id: int, similarity: float = 0.9) -> Hit:
@@ -36,3 +39,28 @@ class RecordingProvider:
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
         self.calls.append(messages)
         yield self.answer
+
+
+class MemoryStore:
+    """In-memory Store: records messages and LLM calls. No database."""
+
+    def __init__(self) -> None:
+        self.messages: dict[UUID, list[StoredMessage]] = {}
+        self.llm_calls: list[LLMCall] = []
+        self.schema_initialized = False
+
+    def init_schema(self) -> None:
+        self.schema_initialized = True
+
+    def add_message(
+        self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
+    ) -> None:
+        self.messages.setdefault(session_id, []).append(
+            StoredMessage(role, content, sources, datetime.now(UTC))
+        )
+
+    def get_messages(self, session_id: UUID) -> list[StoredMessage]:
+        return list(self.messages.get(session_id, []))
+
+    def log_llm_call(self, call: LLMCall) -> None:
+        self.llm_calls.append(call)
