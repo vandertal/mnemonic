@@ -26,5 +26,6 @@ def embed_documents(texts: Iterable[str]) -> list[np.ndarray]:
 
 
 def embed_query(text: str) -> np.ndarray:
-    # bge expects a query instruction prefix; fastembed adds it in query_embed.
+    # fastembed's query_embed adds NO instruction prefix for BGE (it equals embed). Measured
+    # in lab-31 ("Short-query weakness"): adding the prefix by hand did not help.
     return next(iter(_model().query_embed(text)))

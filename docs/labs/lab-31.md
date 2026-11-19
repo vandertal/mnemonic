@@ -143,6 +143,37 @@ On-topic min 0.808, off-topic max 0.739 → threshold **0.77**, the middle of th
 margin is thin (~0.03 on each side); real tuning needs the M5 eval set. Scores of different questions are
 not calibrated probabilities — the threshold is an empirical cut for this model and this corpus.
 
+**Short-query weakness (found live, 2026-11-20).** The threshold was tuned on long questions. Short or
+misspelled ones ("What is requst?", "What is the cli?" as a follow-up) score 0.6–0.72 and get a false
+"I don't know". Measured top-1 similarity (embeddings + DB only, no LLM), three query variants:
+V0 = as is; V1 = BGE prefix "Represent this sentence for searching relevant passages: " (fastembed's
+`query_embed` adds no prefix for BGE, so V0 has none); V2 = for ≤4-word questions embed
+"<previous user question> <question>" (worst case: the previous question was on-topic).
+
+| query | V0 | V1 | V2 |
+|---|---|---|---|
+| on: Fastapi | 0.905 | 0.893 | 0.827 |
+| on: What is the fastapi? | 0.894 | 0.855 | 0.829 |
+| on: What is request? | 0.714 | 0.686 | 0.828 |
+| on: What is requst? | 0.595 | 0.531 | 0.796 |
+| on: What is the cli? | 0.721 | 0.690 | 0.816 |
+| on: What is the FastAPI CLI? | 0.867 | 0.849 | 0.867 |
+| on: How do I use the FastAPI CLI? | 0.873 | 0.897 | 0.873 |
+| on: 7 eval questions (long) | min 0.808 | min 0.804 | min 0.808 |
+| off: Django view (eval) | 0.760 | 0.753 | 0.760 |
+| off: lasagna / World Cup (eval) | 0.570 / 0.550 | 0.559 / 0.548 | 0.570 / 0.550 |
+| off: Django | 0.718 | 0.718 | **0.824** |
+| off: recipe | 0.645 | 0.668 | **0.823** |
+| off: football | 0.587 | 0.588 | **0.796** |
+| off: What is Flask? | 0.719 | 0.693 | **0.804** |
+
+Result: V2 fixes the three failing queries but pulls every short off-domain query above 0.77 (a short query
+gets dominated by the previous on-topic question) and there is no threshold that separates them. V1 keeps
+all off-domain below the threshold but passes the same 11/14 on-topic queries as V0 and does not fix the
+failing ones (it is slightly worse on them). **Decision: keep V0 and 0.77** (no variant gives a clean gap that
+passes more questions). The weakness stays open; the real fix is a different mechanism (query rewriting by
+the LLM, or hybrid keyword + vector search), not a prefix or a threshold.
+
 Live run (real Gemini + Neon, 5 on-topic + 3 off-domain):
 
 - CORS, background tasks, request body, OAuth2/JWT: correct answers, citations point to the right files
