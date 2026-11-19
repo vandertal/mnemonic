@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mnemonic</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 0 auto; padding: 1rem; }
+    #log { display: flex; flex-direction: column; gap: .5rem; min-height: 50vh; }
+    .msg { padding: .5rem .75rem; border-radius: .5rem; white-space: pre-wrap; }
+    .user { background: #e8f0fe; align-self: flex-end; }
+    .assistant { background: #f1f3f4; }
+    .error { background: #fde8e8; }
+    form { display: flex; gap: .5rem; margin-top: 1rem; }
+    input { flex: 1; padding: .5rem; font-size: 1rem; }
+    button { padding: .5rem 1rem; font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Mnemonic</h1>
+  <div id="log"></div>
+  <form id="form">
+    <input id="input" autocomplete="off" placeholder="Ask a question…" required>
+    <button id="send">Send</button>
+  </form>
+
+  <script>
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const send = document.getElementById("send");
+    const history = [];
+
+    function addMessage(role, text = "") {
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.textContent = text; // textContent, never innerHTML: model output is untrusted
+      log.appendChild(el);
+      return el;
+    }
+
+    // Parse one SSE block ("event: x\ndata: <json>") into {event, data}.
+    function parseEvent(block) {
+      let event = "message", data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7);
+        else if (line.startsWith("data: ")) data = JSON.parse(line.slice(6));
+      }
+      return { event, data };
+    }
+
+    async function ask(question) {
+      history.push({ role: "user", content: question });
+      addMessage("user", question);
+      const bubble = addMessage("assistant");
+      let answer = "";
+
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history }),
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop(); // last piece may be incomplete
+        for (const block of blocks) {
+          const { event, data } = parseEvent(block);
+          if (event === "error") {
+            bubble.classList.add("error");
+            bubble.textContent = data;
+            history.pop(); // drop the unanswered question
+            return;
+          }
+          if (event === "message") {
+            answer += data;
+            bubble.textContent = answer;
+          }
+        }
+      }
+      history.push({ role: "assistant", content: answer });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+      input.value = "";
+      send.disabled = true;
+      try {
+        await ask(question);
+      } catch (err) {
+        history.pop();
+        addMessage("assistant error", "Request failed: " + err.message);
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
