@@ -12,7 +12,7 @@ Each item shows the milestone that closes it.
 
 - [x] Web chat UI → **M1**
 - [x] Streamed LLM responses → **M1**
-- [ ] RAG over the domain documents → **M2 + M3**
+- [ ] RAG over the domain documents → **M2 + M3** (M2 done: data is ingested)
 - [ ] Source citations next to answers → **M3**
 - [ ] 5+ seed questions give useful, accurate answers → **M3**
 - [ ] Deployed to a public URL → **M4**
@@ -29,7 +29,7 @@ Each item shows the milestone that closes it.
 
 ### Advanced — side quests
 
-- [ ] Production vector DB (pgvector) → **M2**
+- [x] Production vector DB (pgvector) → **M2**
 - [ ] Structured output (flashcards as JSON) → **M6**
 - [ ] Benchmark: RAG vs plain LLM on the eval set → **M6**
 - [ ] Citation UI (click a citation → see the source paragraph) → **M6**
@@ -72,7 +72,7 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 Notes: a stalled provider times out after `LLM_TIMEOUT_SECONDS`. The default model is
 `gemini-3.5-flash-lite`, see [ADR 0002](../decisions/0002-gemini-model-choice.md).
 
-### M2 — Data
+### M2 — Data ✅ done
 
 - Ingest script: fetch the FastAPI docs Markdown (git clone into a git-ignored folder — raw data is not committed).
 - Chunk into ~500 tokens with ~50 overlap; keep metadata (file path, heading).
@@ -81,10 +81,26 @@ Notes: a stalled provider times out after `LLM_TIMEOUT_SECONDS`. The default mod
 - Store chunks + vectors in Neon Postgres with pgvector.
 
 **Definition of Done**
-- `uv run python -m <package>.ingest` fills the table.
-- Re-running ingest is idempotent (no duplicates).
-- Tests for the chunker (sizes, overlap, metadata).
-- Row count and one sample similarity query documented here.
+- [x] `uv run python -m mnemonic.ingest` fills the table.
+- [x] Re-running ingest is idempotent (no duplicates).
+- [x] Tests for the chunker (sizes, overlap, metadata).
+- [x] Row count and one sample similarity query documented here.
+
+**Results**
+
+- Source: `docs/en/docs` of the FastAPI repo (shallow clone into `backend/data/`, git-ignored).
+- 2203 chunks produced, **2202 rows** stored (one exact duplicate inside a file collapsed by `content_hash`).
+- Second run: `Inserted 0. Total rows: 2202`.
+- Sample query (cosine, top-3) — "How do I declare a query parameter with validation?":
+
+| similarity | file | heading |
+|---|---|---|
+| 0.840 | tutorial/path-params-numeric-validations.md | Path Parameters and Numeric Validations > Declare metadata |
+| 0.834 | tutorial/query-params-str-validations.md | Query Parameters and String Validations > Alias parameters |
+| 0.830 | tutorial/path-params-numeric-validations.md | Path Parameters and Numeric Validations > Recap |
+
+- Decisions: [ADR 0003](../decisions/0003-chunk-identity-and-index.md). Note for M3: top scores for an on-topic
+  question are only ~0.83-0.84, so the "I don't know" threshold must be tuned on real data, not guessed.
 
 ### M3 — RAG
 
