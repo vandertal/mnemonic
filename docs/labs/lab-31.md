@@ -30,10 +30,10 @@ Each item shows the milestone that closes it.
 ### Advanced — side quests
 
 - [x] Production vector DB (pgvector) → **M2**
-- [ ] Structured output (flashcards as JSON) → **M6**
-- [ ] Benchmark: RAG vs plain LLM on the eval set → **M6**
-- [ ] Citation UI (click a citation → see the source paragraph) → **M6**
-- [ ] Conversational memory (earlier turns, not only retrieval) → **M6**
+- [x] Structured output (flashcards as JSON) → **M6**
+- [x] Benchmark: RAG vs plain LLM on the eval set → **M6**
+- [x] Citation UI (click a citation → see the source paragraph) → **M6**
+- [x] Conversational memory (earlier turns, not only retrieval) → **M6**
 - [ ] Multi-document upload (per-user document spaces) → **M7**
 - [ ] Tool use / agentic loop → **M7**
 - [ ] Local model via Ollama + tradeoffs write-up → **M7**
@@ -234,7 +234,7 @@ Not done / holes (from the M5a report and M5b):
 - Eval score and methodology in the README.
 - 5+ real users tried it; short notes on their feedback in this file.
 
-### M6 — Advanced, part 1
+### M6 — Advanced, part 1 ✅ done
 
 - Flashcards via structured output (Pydantic schema → JSON → rendered cards).
 - Benchmark: RAG vs plain LLM on the eval set, results table.
@@ -243,6 +243,28 @@ Not done / holes (from the M5a report and M5b):
 
 **Definition of Done**
 - Each feature demoed; benchmark numbers in the README.
+
+**Results**
+
+- **Memory:** `/chat` reads the session from the DB *before* saving the new question and sends the last
+  `HISTORY_MESSAGES=6` messages as complete user→assistant pairs (an unanswered question is skipped) + the
+  current question. The system message is still built only on the server. **Limitation:** retrieval uses only
+  the current question, so a follow-up like "how do I make it optional?" may retrieve badly; old answers also
+  contain citation ids that are not in the new context (invalid ids are dropped by the existing validation).
+- **Citations:** `GET /chunks/{id}` (key required; 404 if unknown) → `{id, file, heading, content}`; a source
+  under an answer expands to the chunk text (`textContent`, never `innerHTML`).
+- **Flashcards:** `LLMProvider.generate_json(messages, schema)`; Gemini JSON mode + `response_schema`, then
+  Pydantic validation; invalid JSON → one repeat → HTTP 502 with a readable message. `POST /flashcards
+  {session_id, message_id}` builds cards from the stored answer and its sources; `source_chunk_id` not among
+  those sources → `null`. Same key, per-IP limit, global budget, 429/503 retry and `llm_calls` row as `/chat`.
+  The SSE `done` event now carries `{"message_id": N}`; history rows carry `id`. Checked live with Gemini.
+- **Benchmark** (RAG vs plain, same 10 questions): keywords 93% vs 100%, honest refusal 3/3 vs 0/3, source links
+  7/7 vs 0/7. Honest reading: no keyword advantage for RAG (the model knows public FastAPI docs); the gain is
+  checkable sources and scope control. See `eval/benchmark.md` and the README.
+- Tests: 86 passing (memory pairs/cut, `/chunks` 200/404/401, flashcards schema / invalid JSON retry → 502 /
+  invalid source id → `None` / budget). A test caught an off-by-negative-index bug in the history slice.
+- Not done: the UI was not checked in a real browser (JS syntax checked only); the `/flashcards` HTTP call is
+  not covered by a browser test.
 
 ### M7 — Advanced, part 2
 

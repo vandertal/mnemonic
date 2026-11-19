@@ -3,6 +3,21 @@ AI study assistant: ask your documents, get flashcards from text and images
 
 **Live demo:** <https://mnemonic-y1js.onrender.com> — the free tier sleeps after 15 minutes idle, the first request takes ~30–60 s.
 
+## Features
+
+- **Questions over the FastAPI docs (RAG).** Answers stream in and cite their sources; an off-topic
+  question gets "I don't know" without calling the LLM.
+- **Clickable citations.** Click a source under an answer to read the exact chunk text
+  (`GET /chunks/{id}`).
+- **Conversation memory.** The last 3 question/answer pairs (`HISTORY_MESSAGES=6`) go into the prompt, so
+  "and what about X?" works. Retrieval still searches only by the *current* question, so a vague follow-up
+  such as "how do I make it optional?" can retrieve poorly.
+- **Flashcards.** "Make flashcards" under an answer turns it into 3–5 question/answer cards (click to flip).
+  The model returns JSON that is validated against a Pydantic schema (structured output); `POST /flashcards`.
+- **Eval and benchmark** against a plain LLM: see below.
+- Sessions persist in Postgres, access code + per-IP and global rate limits, every LLM call is logged
+  (tokens, cost estimate).
+
 ## Access
 
 The service spends a small free-tier LLM quota, so it is closed behind an access code (`X-API-Key`).
@@ -93,3 +108,28 @@ Full table: [eval/results.md](eval/results.md).
 - The similarity threshold (0.77) was calibrated on 8 questions; the margin to the nearest off-domain score is ~0.03.
   The off-domain questions here are different from the calibration ones, but still few and easy.
 - One run, one model, non-deterministic LLM output: a re-run can differ.
+
+## Benchmark: RAG vs plain LLM
+
+[eval/run_benchmark.py](eval/run_benchmark.py) asks the same 10 questions twice with the same model: through the
+running server (RAG) and directly through the backend's provider with no retrieval and no system prompt (plain).
+
+```powershell
+$env:APP_API_KEY = "<code>"; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
+uv run --project backend python eval/run_benchmark.py     # writes eval/benchmark.md
+```
+
+Results (2026-11-20, `gemini-3.5-flash-lite`, full table in [eval/benchmark.md](eval/benchmark.md)):
+
+| metric | RAG | plain LLM |
+|---|---|---|
+| Keywords found, on-topic (7 q) | 93% | 100% |
+| Honest refusal, off-domain (3 q) | 3/3 | 0/3 |
+| On-topic answers with source links | 7/7 | 0/7 (none by design) |
+| False refusals, on-topic | 0/7 | 0/7 |
+
+**What it shows and what it does not.** RAG gives checkable sources and stays in scope; it did *not* beat the
+plain model on keywords, probably because the model knows the public FastAPI docs from training. So this is
+not proof that "RAG is better". Limits: 10 questions, one run, keywords do not measure correctness, and the
+plain-model "refusal" is a crude substring match on a short phrase list (it misses refusals worded differently
+and can fire on normal answers); for off-domain questions an ordinary assistant answering is not a bug.
