@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # RAG: how many chunks to retrieve, and the minimum cosine similarity of the best one.
     # Below the threshold the app answers "I don't know" without calling the LLM.
     retrieval_top_k: int = 5
-    similarity_threshold: float = 0.0
+    similarity_threshold: float = 0.77
 
 
 @lru_cache
