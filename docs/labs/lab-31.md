@@ -55,7 +55,7 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 
 ## 2. Milestones
 
-### M1 — Skeleton
+### M1 — Skeleton ✅ done
 
 - `backend/` created with `uv init`; FastAPI app.
 - `LLMProvider` interface (`stream(messages) -> async iterator of tokens`).
@@ -64,10 +64,13 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 - Plain HTML + JS chat page served by the backend.
 
 **Definition of Done**
-- A question typed in the browser → the answer streams in word by word.
-- API key only in `.env`; `.env.example` committed with empty values.
-- Billing is not connected to the Gemini account (free tier) — no way to be charged.
-- Tests: provider selection from settings, chat endpoint with a fake provider. `ruff` + `pytest` green.
+- [x] A question typed in the browser → the answer streams in word by word.
+- [x] API key only in `.env`; `.env.example` committed with empty values.
+- [x] Billing is not connected to the Gemini account (free tier) — no way to be charged.
+- [x] Tests: provider selection from settings, chat endpoint with a fake provider. `ruff` + `pytest` green.
+
+Notes: a stalled provider times out after `LLM_TIMEOUT_SECONDS`. The default model is
+`gemini-3.5-flash-lite`, see [ADR 0002](../decisions/0002-gemini-model-choice.md).
 
 ### M2 — Data
 
@@ -89,8 +92,11 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 - Prompt: system message + numbered chunks + question; the model cites chunk IDs.
 - Cited IDs are validated against the retrieved ones; invalid citations are dropped.
 - Best similarity below the threshold → "I don't know" without calling the LLM.
+- `/chat` request: the client sends only `user` / `assistant` messages; the server adds the
+  `system` message itself (the client must not be able to set or override the system prompt).
 
 **Definition of Done**
+- A request with a client-supplied `system` message is rejected (422) or ignored — covered by a test.
 - 5 seed questions answered correctly with real citations.
 - 3 off-domain questions → "I don't know".
 - Threshold value and how it was chosen documented here.
@@ -98,8 +104,10 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 ### M4 — Deploy
 
 - Render web service; secrets as environment variables; public URL.
+- Log the active LLM provider and model at startup (never the key).
 
 **Definition of Done**
+- The startup log shows which provider and model the live service uses.
 - Streaming works on the live URL.
 - Memory usage on Render checked (fits the free tier).
 - No secrets in the repo or in the page source.
@@ -110,12 +118,16 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 - Sessions and messages stored in Postgres; chat restored after reload.
 - API-key header gate + per-IP rate limit.
 - Log of every LLM call: tokens in/out, cost estimate.
+- Retry with exponential backoff on 503 (and 429), only **before the first token** has been sent —
+  after streaming started a retry would duplicate text.
+- A service-wide request budget (see risk 6), not only the per-IP limit.
 - `eval/eval.json` (10 Q&A pairs) + `eval/run_eval.py` + recorded results.
 - UI polish, mobile layout.
 
 **Definition of Done**
 - Reload keeps the conversation.
 - Over the limit → HTTP 429; missing/invalid key → HTTP 401.
+- A simulated 503 before the first token is retried; a failure after the first token is not (tests with a fake provider).
 - Eval score and methodology in the README.
 - 5+ real users tried it; short notes on their feedback in this file.
 
@@ -175,3 +187,4 @@ Answers are filled in at the end of the lab.
 | 3 | Bad similarity threshold: too high → "I don't know" on valid questions, too low → hallucinations. | Tune on the eval set; log top scores per question. |
 | 4 | Render free service sleeps → slow first request during a demo. | Warm it up before the defense; note it in the README. |
 | 5 | Scope creep: M6–M7 are large. | Reach Standard (M5) first; Advanced only after M5 is green. |
+| 6 | The free-tier Gemini quota is about 5–10 requests per minute for the **whole project**, not per user (figure from the review; verify in AI Studio). A per-IP limit does not protect it: a few users at once (the 5+ real users in M5, the live demo) can exhaust it. | By M5: a global limiter / short queue in front of the LLM, a clear "busy, try again" message instead of a hang, backoff before the first token, no eval runs during a demo. |
