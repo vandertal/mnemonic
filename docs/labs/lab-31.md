@@ -15,7 +15,7 @@ Each item shows the milestone that closes it.
 - [x] RAG over the domain documents → **M2 + M3**
 - [ ] Source citations next to answers → **M3**
 - [x] 5+ seed questions give useful, accurate answers → **M3**
-- [ ] Deployed to a public URL → **M4**
+- [x] Deployed to a public URL → **M4**
 
 ### Standard — "It's a Real Mini-Product"
 
@@ -42,15 +42,15 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 
 ### Deployment checklist
 
-- [ ] Live URL works → **M4**
-- [ ] LLM API key is server-side only, never in the browser → **M1** (design), **M4** (verified)
+- [x] Live URL works → **M4**
+- [x] LLM API key is server-side only, never in the browser → **M1** (design), **M4** (verified)
 - [ ] Hard billing limit on the LLM provider: billing not connected (free tier) → **M1**
 - [ ] Rate limit + auth in place (no anonymous unlimited use) → **M5**
-- [ ] Streaming works in production → **M4**
+- [x] Streaming works in production → **M4**
 - [ ] Mobile UI works → **M5**
 - [x] Citations point to real chunks (cited IDs validated) → **M3**
 - [x] "I don't know" tested with off-domain questions → **M3** (+ eval in **M5**)
-- [ ] No secrets in source → **M1** (`.env.example`), re-checked in **M4**
+- [x] No secrets in source → **M1** (`.env.example`), re-checked in **M4**
 - [ ] README documents the eval methodology and results → **M5**
 
 ## 2. Milestones
@@ -154,12 +154,12 @@ Live run (real Gemini + Neon, 5 on-topic + 3 off-domain):
 - Off-domain (Django, carbonara, World Cup): "I don't know", provider not called.
 - Not done in the UI: the page does not yet render the `sources` event (citations are only in the stream).
 
-### M4 — Deploy
+### M4 — Deploy ✅ done
 
 - Render web service; secrets as environment variables; public URL.
 - Log the active LLM provider and model at startup (never the key).
 
-Prepared (not closed until the service is live):
+Done. Live: https://mnemonic-y1js.onrender.com (streaming checked with a real /chat request):
 
 - `render.yaml` Blueprint (root `backend`, free plan, uv build, uvicorn on `$PORT`); secrets are `sync: false`.
 - Startup log `LLM provider: gemini (model: ...)` added (it was not in M1). `logging.basicConfig(INFO)` too:

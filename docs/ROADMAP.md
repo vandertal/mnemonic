@@ -27,4 +27,4 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 
 ## Current lab
 
-**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data and M3 RAG are done. Next: M4 Deploy.
+**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data, M3 RAG and M4 Deploy are done. Next: M5 Standard.

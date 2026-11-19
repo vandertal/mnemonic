@@ -1,7 +1,7 @@
 # mnemonic
 AI study assistant: ask your documents, get flashcards from text and images
 
-**Live demo:** <LIVE_URL_PLACEHOLDER> — the free tier sleeps after 15 minutes idle, the first request takes ~30–60 s.
+**Live demo:** <https://mnemonic-y1js.onrender.com> — the free tier sleeps after 15 minutes idle, the first request takes ~30–60 s.
 
 ## Run locally
 
