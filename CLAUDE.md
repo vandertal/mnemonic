@@ -49,7 +49,7 @@ mnemonic/
 
 ## Environment
 
-- Windows 11, PowerShell. Use PowerShell-compatible commands.
+- Windows 11, PowerShell 7 (`pwsh`). Use PowerShell-compatible commands.
 - Python only through `uv` (`uv add`, `uv run ...`). Never use bare `pip` or the system Python.
 - Secrets only in `.env` (git-ignored). Commit a `.env.example` with empty values instead.
 - GPU: RTX 5070 available locally for training (lab 33).
@@ -59,6 +59,7 @@ mnemonic/
 1. **One milestone per session.** Start by restating the milestone and a short plan; wait for "ok" before large changes.
 2. **Vertical slice first:** the thinnest end-to-end version that works, then improve.
 3. **Small commits**, Conventional Commits style: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`.
+   No `Co-Authored-By` or other AI attribution lines in commit messages or PR descriptions.
 4. **Tests** for new logic (pytest). Run `ruff` and tests before saying a task is done.
 5. **Never** commit secrets, `.env`, model weights or large data files.
 6. At the end of a milestone: tick it in `docs/ROADMAP.md`, add notable decisions to `docs/decisions/`.

@@ -18,6 +18,7 @@ winget upgrade --all
 | VS Code | 1.146.0 | Editor | `winget uninstall Microsoft.VisualStudioCode` |
 | Node.js LTS | 26.13.1 | Frontend build (lab 22) | `winget uninstall OpenJS.NodeJS.LTS` |
 | Claude Code | 2.1.318 | AI coding assistant in the repo | `winget uninstall Anthropic.ClaudeCode` |
+| PowerShell 7 (`pwsh`) | 7.7.0 | Modern shell (`&&`, UTF-8 by default); default profile in Windows Terminal | `winget uninstall Microsoft.PowerShell` (+ reset the default profile in Windows Terminal) |
 
 VS Code extensions: `ms-python.python`, `charliermarsh.ruff`, `anthropic.claude-code`.
 
@@ -29,8 +30,9 @@ VS Code extensions: `ms-python.python`, `charliermarsh.ruff`, `anthropic.claude-
 
 ## Git configuration (global)
 
-- `user.name` = vandertal, `user.email` = GitHub noreply address
+- `user.name` = Vladislav, `user.email` = GitHub noreply address
 - `init.defaultBranch` = main, `core.autocrlf` = true
+- `core.longpaths` = true — allows paths longer than 260 chars on Windows (deep `node_modules/`)
 - GitHub auth via `gh auth login` (HTTPS)
 
 ## Accounts
