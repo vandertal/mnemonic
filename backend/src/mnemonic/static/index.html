@@ -5,19 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mnemonic</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 0 auto; padding: 1rem; }
-    #log { display: flex; flex-direction: column; gap: .5rem; min-height: 50vh; }
-    .msg { padding: .5rem .75rem; border-radius: .5rem; white-space: pre-wrap; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; font-size: 16px; line-height: 1.5;
+           max-width: 42rem; margin: 0 auto; padding: 0 1rem; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.4rem; margin: .75rem 0; }
+    #log { display: flex; flex-direction: column; gap: .75rem; padding-bottom: 1rem; }
+    .msg { padding: .6rem .8rem; border-radius: .6rem; white-space: pre-wrap;
+           overflow-wrap: anywhere; max-width: 100%; }
     .user { background: #e8f0fe; align-self: flex-end; }
     .assistant { background: #f1f3f4; }
     .error { background: #fde8e8; }
-    form { display: flex; gap: .5rem; margin-top: 1rem; }
-    input { flex: 1; padding: .5rem; font-size: 1rem; }
-    button { padding: .5rem 1rem; font-size: 1rem; }
+    .sources { margin: .5rem 0 0; padding-left: 1.2rem; font-size: .85rem; color: #444;
+               white-space: normal; }
+    form { position: sticky; bottom: 0; display: flex; gap: .5rem; padding: .75rem 0;
+           background: #fff; border-top: 1px solid #ddd; }
+    input { flex: 1; min-width: 0; padding: .6rem; font-size: 1rem; } /* 16px: no iOS zoom */
+    button { padding: .6rem 1rem; font-size: 1rem; }
   </style>
 </head>
 <body>
-  <h1>Mnemonic</h1>
+  <header>
+    <h1>Mnemonic</h1>
+    <button id="new-chat" type="button">New chat</button>
+  </header>
   <div id="log"></div>
   <form id="form">
     <input id="input" autocomplete="off" placeholder="Ask a question…" required>
@@ -29,14 +40,74 @@
     const form = document.getElementById("form");
     const input = document.getElementById("input");
     const send = document.getElementById("send");
-    const history = [];
+
+    // localStorage can throw (private mode, blocked site data): fall back to memory.
+    const mem = {};
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch { return mem[k] ?? null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch { mem[k] = v; } },
+      del(k) { try { localStorage.removeItem(k); } catch { delete mem[k]; } },
+    };
+
+    let sessionId = store.get("session_id");
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      store.set("session_id", sessionId);
+    }
 
     function addMessage(role, text = "") {
       const el = document.createElement("div");
       el.className = "msg " + role;
       el.textContent = text; // textContent, never innerHTML: model output is untrusted
       log.appendChild(el);
+      el.scrollIntoView({ block: "end" });
       return el;
+    }
+
+    // Under the answer: a plain list "file › heading" (clickable citations come in M6).
+    function renderSources(bubble, sources) {
+      if (!sources || !sources.length) return;
+      const list = document.createElement("ul");
+      list.className = "sources";
+      for (const s of sources) {
+        const li = document.createElement("li");
+        li.textContent = s.heading ? `${s.file_path} › ${s.heading}` : s.file_path;
+        list.appendChild(li);
+      }
+      bubble.appendChild(list);
+    }
+
+    // Access code: asked once, kept in localStorage, sent as X-API-Key.
+    function askKey() {
+      const key = (prompt("Access code:") || "").trim();
+      if (key) store.set("api_key", key);
+      return key;
+    }
+
+    // fetch + key header. On 401 the stored key is wrong: erase it and ask once more.
+    async function api(path, options = {}) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let key = store.get("api_key") || askKey();
+        if (!key) throw new Error("An access code is required.");
+        const response = await fetch(path, {
+          ...options,
+          headers: { ...options.headers, "X-API-Key": key },
+        });
+        if (response.status !== 401) return response;
+        store.del("api_key");
+      }
+      throw new Error("The access code was not accepted.");
+    }
+
+    // Human text for a failed HTTP response.
+    function describeHttpError(response) {
+      if (response.status === 429) {
+        const wait = response.headers.get("Retry-After");
+        return "Too many requests right now. " +
+          (wait ? `Try again in ${wait} s.` : "Please try again in a minute.");
+      }
+      if (response.status === 401) return "The access code was not accepted.";
+      return `The server returned an error (HTTP ${response.status}). Please try again.`;
     }
 
     // Parse one SSE block ("event: x\ndata: <json>") into {event, data}.
@@ -49,42 +120,66 @@
       return { event, data };
     }
 
+    async function loadHistory() {
+      try {
+        const response = await api(`/sessions/${sessionId}/messages`);
+        if (!response.ok) throw new Error(describeHttpError(response));
+        for (const m of await response.json()) {
+          renderSources(addMessage(m.role, m.content), m.sources);
+        }
+      } catch (err) {
+        addMessage("assistant error", "Could not load the chat history: " + err.message);
+      }
+    }
+
     async function ask(question) {
-      history.push({ role: "user", content: question });
       addMessage("user", question);
       const bubble = addMessage("assistant");
       let answer = "";
+      const fail = (text) => {
+        bubble.classList.add("error");
+        bubble.textContent = answer ? answer + "\n\n" + text : text;
+      };
 
-      const response = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history }),
-      });
-      if (!response.ok) throw new Error("HTTP " + response.status);
+      let response;
+      try {
+        response = await api("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, message: question }),
+        });
+      } catch (err) {
+        // fetch() rejects with TypeError when the network is down; ours carry a message.
+        fail(err instanceof TypeError ? "No connection to the server. Check your network." : err.message);
+        return;
+      }
+      if (!response.ok) return fail(describeHttpError(response));
 
-      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += value;
-        const blocks = buffer.split("\n\n");
-        buffer = blocks.pop(); // last piece may be incomplete
-        for (const block of blocks) {
-          const { event, data } = parseEvent(block);
-          if (event === "error") {
-            bubble.classList.add("error");
-            bubble.textContent = data;
-            history.pop(); // drop the unanswered question
-            return;
-          }
-          if (event === "message") {
-            answer += data;
-            bubble.textContent = answer;
+      try {
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop(); // last piece may be incomplete
+          for (const block of blocks) {
+            const { event, data } = parseEvent(block);
+            if (event === "error") return fail(data);
+            if (event === "sources") renderSources(bubble, data);
+            else if (event === "message") {
+              answer += data;
+              bubble.firstChild
+                ? (bubble.firstChild.nodeValue = answer)
+                : bubble.append(answer);
+              bubble.scrollIntoView({ block: "end" });
+            }
           }
         }
+      } catch {
+        fail("The connection was lost while the answer was streaming.");
       }
-      history.push({ role: "assistant", content: answer });
     }
 
     form.addEventListener("submit", async (e) => {
@@ -95,14 +190,20 @@
       send.disabled = true;
       try {
         await ask(question);
-      } catch (err) {
-        history.pop();
-        addMessage("assistant error", "Request failed: " + err.message);
       } finally {
         send.disabled = false;
         input.focus();
       }
     });
+
+    document.getElementById("new-chat").addEventListener("click", () => {
+      sessionId = crypto.randomUUID();
+      store.set("session_id", sessionId);
+      log.replaceChildren();
+      input.focus();
+    });
+
+    loadHistory();
   </script>
 </body>
 </html>
