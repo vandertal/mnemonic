@@ -27,4 +27,4 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 
 ## Current lab
 
-**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data, M3 RAG and M4 Deploy are done. Next: M5 Standard.
+**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data, M3 RAG and M4 Deploy are done. M5 Standard is split: **M5a (backend) done** — sessions in Postgres, API-key gate, per-IP and global limits, retry, LLM call log. **M5b next** — UI (key, session id, history, 429 handling, mobile), eval set, real users.

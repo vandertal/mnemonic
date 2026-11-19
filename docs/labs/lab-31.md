@@ -19,11 +19,11 @@ Each item shows the milestone that closes it.
 
 ### Standard — "It's a Real Mini-Product"
 
-- [ ] Session history persists across reloads (Postgres) → **M5**
+- [ ] Session history persists across reloads (Postgres) → **M5** (backend done in M5a; the UI does not restore it yet)
 - [x] "I don't know" handling when retrieval fails (similarity threshold) → **M3**
 - [ ] Eval set: `eval.json` with 10 Q&A pairs + run script, results recorded → **M5**
-- [ ] Rate limit (per IP) + API-key gate → **M5**
-- [ ] Every LLM call logged (tokens, cost estimate) → **M5**
+- [x] Rate limit (per IP) + API-key gate → **M5** (backend, M5a)
+- [x] Every LLM call logged (tokens, cost estimate) → **M5** (M5a)
 - [ ] Polished UI, works on mobile → **M5**
 - [ ] 5+ real users → **M5**
 
@@ -45,7 +45,7 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 - [x] Live URL works → **M4**
 - [x] LLM API key is server-side only, never in the browser → **M1** (design), **M4** (verified)
 - [ ] Hard billing limit on the LLM provider: billing not connected (free tier) → **M1**
-- [ ] Rate limit + auth in place (no anonymous unlimited use) → **M5**
+- [x] Rate limit + auth in place (no anonymous unlimited use) → **M5** (M5a; to be re-checked on the live URL after deploy)
 - [x] Streaming works in production → **M4**
 - [ ] Mobile UI works → **M5**
 - [x] Citations point to real chunks (cited IDs validated) → **M3**
@@ -177,6 +177,20 @@ Done. Live: https://mnemonic-y1js.onrender.com (streaming checked with a real /c
 - README has the live URL.
 
 ### M5 — Standard
+
+**M5a — backend ✅ done** (M5b: UI, eval, real users — not started)
+
+- [x] Sessions and messages in Postgres (`sessions`, `messages`, `llm_calls`; `CREATE TABLE IF NOT EXISTS` at startup).
+      `POST /chat {session_id, message}` (the client generates the UUID); `GET /sessions/{id}/messages`.
+- [x] `X-API-Key` checked against `APP_API_KEY` (`secrets.compare_digest`); the app does not start without the key.
+- [x] Per-IP sliding window (`RATE_LIMIT_PER_MINUTE`, default 10) → 429 + `Retry-After`.
+- [x] Global LLM budget (`GLOBAL_RPM`, default 5), spent only right before a real LLM call → 429.
+      "I don't know" answers are free.
+- [x] Retry on 503/429 before the first token (3 attempts, 1s/2s backoff + jitter).
+- [x] `llm_calls` log: tokens in/out (provider usage, else ~chars/4 and `+est` in `status`), cost from
+      `PRICE_IN_PER_M` / `PRICE_OUT_PER_M`, latency, status `ok` / `retried` / `error`.
+- Known gaps: the web page still sends the old payload and no key (M5b); the model sees only the current
+  question (conversation memory is M6); a client disconnect mid-stream is not logged; counters are per process.
 
 - Sessions and messages stored in Postgres; chat restored after reload.
 - API-key header gate + per-IP rate limit.
