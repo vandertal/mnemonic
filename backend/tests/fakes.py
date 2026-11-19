@@ -4,7 +4,7 @@ from uuid import UUID
 
 from mnemonic.retrieval import Hit
 from mnemonic.schemas import Message
-from mnemonic.store import LLMCall, StoredMessage
+from mnemonic.store import Chunk, LLMCall, StoredMessage
 
 KEY = "test-key"
 AUTH = {"X-API-Key": KEY}
@@ -51,6 +51,7 @@ class MemoryStore:
         self.messages: dict[UUID, list[StoredMessage]] = {}
         self.llm_calls: list[LLMCall] = []
         self.schema_initialized = False
+        self.chunks: dict[int, Chunk] = {}
 
     def init_schema(self) -> None:
         self.schema_initialized = True
@@ -67,3 +68,6 @@ class MemoryStore:
 
     def log_llm_call(self, call: LLMCall) -> None:
         self.llm_calls.append(call)
+
+    def get_chunks(self, ids: list[int]) -> list[Chunk]:
+        return [self.chunks[i] for i in sorted(ids) if i in self.chunks]

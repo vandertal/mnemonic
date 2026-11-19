@@ -18,6 +18,12 @@
     .error { background: #fde8e8; }
     .sources { margin: .5rem 0 0; padding-left: 1.2rem; font-size: .85rem; color: #444;
                white-space: normal; }
+    button.link { all: unset; cursor: pointer; color: #1a56c4; text-decoration: underline;
+                  overflow-wrap: anywhere; }
+    button.link:focus-visible { outline: 2px solid #1a56c4; }
+    .chunk { margin: .4rem 0; padding: .5rem; background: #fff; border: 1px solid #ddd;
+             border-radius: .4rem; font-size: .8rem; white-space: pre-wrap;
+             overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
     form { position: sticky; bottom: 0; display: flex; gap: .5rem; padding: .75rem 0;
            background: #fff; border-top: 1px solid #ddd; }
     input { flex: 1; min-width: 0; padding: .6rem; font-size: 1rem; } /* 16px: no iOS zoom */
@@ -64,14 +70,38 @@
       return el;
     }
 
-    // Under the answer: a plain list "file › heading" (clickable citations come in M6).
+    // Under the answer: a list "file › heading". Click a source to show / hide the chunk text.
     function renderSources(bubble, sources) {
       if (!sources || !sources.length) return;
       const list = document.createElement("ul");
       list.className = "sources";
       for (const s of sources) {
         const li = document.createElement("li");
-        li.textContent = s.heading ? `${s.file_path} › ${s.heading}` : s.file_path;
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "link";
+        toggle.textContent = s.heading ? `${s.file_path} › ${s.heading}` : s.file_path;
+        let text = null; // the chunk text, created on the first click and then only toggled
+        toggle.addEventListener("click", async () => {
+          if (text) {
+            text.hidden = !text.hidden;
+            return;
+          }
+          text = document.createElement("pre");
+          text.className = "chunk";
+          text.textContent = "Loading…";
+          li.appendChild(text);
+          try {
+            const response = await api(`/chunks/${s.id}`);
+            if (!response.ok) throw new Error(describeHttpError(response));
+            text.textContent = (await response.json()).content; // textContent: docs are untrusted too
+          } catch (err) {
+            text.remove();
+            text = null; // the next click tries again
+            toggle.textContent += " (could not load)";
+          }
+        });
+        li.appendChild(toggle);
         list.appendChild(li);
       }
       bubble.appendChild(list);

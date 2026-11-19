@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
@@ -241,6 +242,20 @@ async def session_messages(
         {"role": m.role, "content": m.content, "sources": m.sources, "created_at": m.created_at}
         for m in stored
     ]
+
+
+@app.get("/chunks/{chunk_id}", dependencies=[Depends(require_api_key)])
+async def chunk_text(
+    chunk_id: Annotated[int, PathParam(ge=1, le=2**63 - 1)],  # chunks.id is a Postgres bigint
+    store: Annotated[Store, Depends(get_store)],
+) -> dict:
+    """The text behind a citation. Behind the key like everything else (the corpus is public,
+    but this endpoint must not become a free scraper)."""
+    found = await asyncio.to_thread(store.get_chunks, [chunk_id])
+    if not found:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    c = found[0]
+    return {"id": c.id, "file": c.file_path, "heading": c.heading, "content": c.content}
 
 
 @app.get("/")

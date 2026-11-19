@@ -58,6 +58,16 @@ class LLMCall:
     status: str
 
 
+@dataclass(frozen=True)
+class Chunk:
+    """A knowledge-base chunk as stored (no vector): what a citation points to."""
+
+    id: int
+    file_path: str
+    heading: str
+    content: str
+
+
 class Store(Protocol):
     """Blocking API: call it from a worker thread (asyncio.to_thread)."""
 
@@ -72,6 +82,10 @@ class Store(Protocol):
     def get_messages(self, session_id: UUID) -> list[StoredMessage]: ...
 
     def log_llm_call(self, call: LLMCall) -> None: ...
+
+    def get_chunks(self, ids: list[int]) -> list[Chunk]:
+        """The chunks that exist among `ids` (unknown ids are simply absent)."""
+        ...
 
 
 class PgStore:
@@ -109,6 +123,14 @@ class PgStore:
                 (session_id,),
             ).fetchall()
         return [StoredMessage(*row) for row in rows]
+
+    def get_chunks(self, ids: list[int]) -> list[Chunk]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, file_path, heading, content FROM chunks WHERE id = ANY(%s) ORDER BY id",
+                (ids,),
+            ).fetchall()
+        return [Chunk(*row) for row in rows]
 
     def log_llm_call(self, call: LLMCall) -> None:
         with self._connect() as conn:
