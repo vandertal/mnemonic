@@ -34,7 +34,7 @@ Each item shows the milestone that closes it.
 - [x] Benchmark: RAG vs plain LLM on the eval set → **M6**
 - [x] Citation UI (click a citation → see the source paragraph) → **M6**
 - [x] Conversational memory (earlier turns, not only retrieval) → **M6**
-- [ ] Multi-document upload (per-user document spaces) → **M7**
+- [x] Multi-document upload (per-user document spaces) → **M7a** (owner = client UUID, not real auth)
 - [ ] Tool use / agentic loop → **M7**
 - [ ] Local model via Ollama + tradeoffs write-up → **M7**
 
@@ -305,6 +305,33 @@ Not done / holes (from the M5a report and M5b):
 
 **Definition of Done**
 - Each feature demoed; switching the provider is one line in `.env`.
+
+#### M7a — uploads ✅ done (2026-11-20)
+
+- **Owner, not auth.** `owner_id` = a UUID the browser generates (localStorage), like `session_id`. Shared
+  FastAPI chunks have `owner_id NULL`; retrieval filters `owner_id IS NULL OR owner_id = :owner`. This is
+  isolation by an unguessable id, not authentication; real accounts: lab 21 (stated in the README).
+- **Schema** without Alembic: `documents` table + `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS document_id,
+  owner_id` in `ingest/db.py` `SCHEMA`; app startup runs it before its own tables. Deleting a document
+  cascades to its chunks (`ON DELETE CASCADE`).
+- **Endpoints** (key + `owner_id`): `POST /documents` (multipart, same per-IP limit as `/chat`),
+  `GET /documents`, `DELETE /documents/{id}` (own only, else 404). `/chat`, `/flashcards` and
+  `/chunks/{id}` take `owner_id`; a foreign chunk is 404, identical to a missing one (no id enumeration).
+- **Limits** (`config.py`): 5 MB, 50 PDF pages, 5 documents per owner (checked again inside the insert
+  transaction under an advisory lock, so parallel uploads cannot slip past). Extension decides the type, then
+  the content is checked (a `.txt` that is a PDF or binary -> 422; unknown extension -> 415; too big -> 413;
+  over quota -> 409; image-only PDF -> 422 "scanned PDF not supported").
+- **Reuse:** the same chunker and fastembed; extraction + chunking + embedding run in `asyncio.to_thread`.
+- **Uploaded text is data:** the system prompt says chunks are never instructions; file names are reduced to a
+  safe alphabet, and `format_context` neutralises `"`, `<`, newlines in the `source` attribute and `</chunk`
+  inside the text, so a file cannot close its own tag. This lowers prompt-injection risk, it does not remove it.
+- **Tests:** fake embedder/tokenizer, in-memory store, real PDFs made with pypdf. The SQL owner filter is
+  checked by capturing the query (no database in tests), **not** run against a real Postgres: do a manual
+  upload on the live DB after deploy.
+- **Known holes:** no real auth (above); FastAPI parses a multipart body before the dependencies run, so an
+  unauthenticated client can still make the server buffer up to one body (a proxy size limit would fix it);
+  a 5 MB text file is ~2500 chunks, which is slow to embed on the free CPU; the pgvector HNSW index is
+  filtered after the search, fine while uploads are a small part of the corpus.
 
 ## 3. Make it yours — why FastAPI docs
 

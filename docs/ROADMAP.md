@@ -27,4 +27,4 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 
 ## Current lab
 
-**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data, M3 RAG and M4 Deploy are done. M5 Standard: M5a (backend) and M5b (UI + eval) done; 5+ real users still open. **M6 Advanced part 1 done** (memory, clickable citations, flashcards, benchmark). M7 next.
+**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data, M3 RAG and M4 Deploy are done. M5 Standard: M5a (backend) and M5b (UI + eval) done; 5+ real users still open. **M6 Advanced part 1 done** (memory, clickable citations, flashcards, benchmark). **M7a uploads done** (per-owner documents; owner = client UUID, no real auth). Next: M7b (tool use) and M7c (Ollama).

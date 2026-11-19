@@ -4,7 +4,7 @@ from uuid import UUID
 
 from mnemonic.retrieval import Hit
 from mnemonic.schemas import Message
-from mnemonic.store import Chunk, LLMCall, StoredMessage
+from mnemonic.store import Chunk, LLMCall, StoredDocument, StoredMessage, TooManyDocuments
 
 KEY = "test-key"
 AUTH = {"X-API-Key": KEY}
@@ -26,9 +26,11 @@ class FakeRetriever:
     def __init__(self, hits: list[Hit]) -> None:
         self.hits = hits
         self.questions: list[str] = []
+        self.owners: list[UUID | None] = []
 
-    def __call__(self, question: str) -> list[Hit]:
+    def __call__(self, question: str, owner_id: UUID | None = None) -> list[Hit]:
         self.questions.append(question)
+        self.owners.append(owner_id)
         return self.hits
 
 
@@ -52,7 +54,12 @@ class MemoryStore:
         self.llm_calls: list[LLMCall] = []
         self.schema_initialized = False
         self.chunks: dict[int, Chunk] = {}
+        self.chunk_owner: dict[int, UUID | None] = {}  # absent / None = shared
+        self.documents: dict[int, tuple[UUID, StoredDocument]] = {}
+        self.chunk_document: dict[int, int] = {}
         self._next_id = 0
+        self._next_chunk_id = 1000
+        self._next_doc_id = 0
 
     def init_schema(self) -> None:
         self.schema_initialized = True
@@ -72,5 +79,40 @@ class MemoryStore:
     def log_llm_call(self, call: LLMCall) -> None:
         self.llm_calls.append(call)
 
-    def get_chunks(self, ids: list[int]) -> list[Chunk]:
-        return [self.chunks[i] for i in sorted(ids) if i in self.chunks]
+    def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:
+        return [
+            self.chunks[i]
+            for i in sorted(ids)
+            if i in self.chunks and self.chunk_owner.get(i) in (None, owner_id)
+        ]
+
+    def count_documents(self, owner_id: UUID) -> int:
+        return sum(1 for o, _ in self.documents.values() if o == owner_id)
+
+    def list_documents(self, owner_id: UUID) -> list[StoredDocument]:
+        return [d for o, d in self.documents.values() if o == owner_id]
+
+    def add_document(self, owner_id, filename, chunks, vectors, max_documents) -> StoredDocument:
+        assert len(chunks) == len(vectors)
+        if self.count_documents(owner_id) >= max_documents:
+            raise TooManyDocuments
+        self._next_doc_id += 1
+        doc = StoredDocument(self._next_doc_id, filename, datetime.now(UTC), len(chunks))
+        self.documents[doc.id] = (owner_id, doc)
+        for c in chunks:
+            self._next_chunk_id += 1
+            self.chunks[self._next_chunk_id] = Chunk(
+                self._next_chunk_id, c.file_path, c.heading, c.content
+            )
+            self.chunk_owner[self._next_chunk_id] = owner_id
+            self.chunk_document[self._next_chunk_id] = doc.id
+        return doc
+
+    def delete_document(self, owner_id: UUID, document_id: int) -> bool:
+        entry = self.documents.get(document_id)
+        if entry is None or entry[0] != owner_id:
+            return False
+        del self.documents[document_id]
+        for cid in [c for c, d in self.chunk_document.items() if d == document_id]:
+            del self.chunks[cid], self.chunk_owner[cid], self.chunk_document[cid]
+        return True

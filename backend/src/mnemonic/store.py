@@ -1,14 +1,22 @@
 """Chat storage: sessions, messages and the LLM call log. Raw SQL via psycopg, no ORM."""
 
+import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
+import numpy as np
 import psycopg
+from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
+from mnemonic.ingest import db as chunks_db
+from mnemonic.ingest.chunker import Chunk as NewChunk
+
 # Created at app startup; every statement is idempotent. No migrations yet (Alembic: lab 21).
+# The chunks / documents tables are created by `chunks_db.SCHEMA`, which init_schema runs first.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id         uuid PRIMARY KEY,
@@ -69,6 +77,20 @@ class Chunk:
     content: str
 
 
+@dataclass(frozen=True)
+class StoredDocument:
+    """An uploaded document (metadata only)."""
+
+    id: int
+    filename: str
+    created_at: datetime
+    chunks: int
+
+
+class TooManyDocuments(Exception):
+    """The owner already has the maximum number of documents."""
+
+
 class Store(Protocol):
     """Blocking API: call it from a worker thread (asyncio.to_thread)."""
 
@@ -84,8 +106,28 @@ class Store(Protocol):
 
     def log_llm_call(self, call: LLMCall) -> None: ...
 
-    def get_chunks(self, ids: list[int]) -> list[Chunk]:
-        """The chunks that exist among `ids` (unknown ids are simply absent)."""
+    def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:
+        """The chunks among `ids` that `owner_id` may see: shared ones and their own. Unknown
+        ids and other owners' chunks are both simply absent (so ids cannot be enumerated)."""
+        ...
+
+    def count_documents(self, owner_id: UUID) -> int: ...
+
+    def list_documents(self, owner_id: UUID) -> list[StoredDocument]: ...
+
+    def add_document(
+        self,
+        owner_id: UUID,
+        filename: str,
+        chunks: Sequence[NewChunk],
+        vectors: Sequence[np.ndarray],
+        max_documents: int,
+    ) -> StoredDocument:
+        """Store a document with its chunks atomically; raises TooManyDocuments at the limit."""
+        ...
+
+    def delete_document(self, owner_id: UUID, document_id: int) -> bool:
+        """Delete the owner's document and its chunks. False if it is not theirs / not there."""
         ...
 
 
@@ -102,6 +144,7 @@ class PgStore:
 
     def init_schema(self) -> None:
         with self._connect() as conn:
+            conn.execute(chunks_db.SCHEMA)  # chunks + documents (+ the M7a columns)
             conn.execute(SCHEMA)
 
     def add_message(
@@ -127,13 +170,85 @@ class PgStore:
             ).fetchall()
         return [StoredMessage(*row) for row in rows]
 
-    def get_chunks(self, ids: list[int]) -> list[Chunk]:
+    def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, file_path, heading, content FROM chunks WHERE id = ANY(%s) ORDER BY id",
-                (ids,),
+                "SELECT id, file_path, heading, content FROM chunks "
+                "WHERE id = ANY(%s) AND (owner_id IS NULL OR owner_id = %s) ORDER BY id",
+                (ids, owner_id),
             ).fetchall()
         return [Chunk(*row) for row in rows]
+
+    def count_documents(self, owner_id: UUID) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM documents WHERE owner_id = %s", (owner_id,)
+            ).fetchone()
+        return row[0]
+
+    def list_documents(self, owner_id: UUID) -> list[StoredDocument]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT d.id, d.filename, d.created_at, count(c.id) FROM documents d "
+                "LEFT JOIN chunks c ON c.document_id = d.id "
+                "WHERE d.owner_id = %s GROUP BY d.id ORDER BY d.id",
+                (owner_id,),
+            ).fetchall()
+        return [StoredDocument(*row) for row in rows]
+
+    def add_document(
+        self,
+        owner_id: UUID,
+        filename: str,
+        chunks: Sequence[NewChunk],
+        vectors: Sequence[np.ndarray],
+        max_documents: int,
+    ) -> StoredDocument:
+        with self._connect() as conn:  # one transaction: an error leaves no half document
+            register_vector(conn)
+            # Serialise this owner's uploads, so two parallel ones cannot both pass the limit.
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(owner_id),))
+            (count,) = conn.execute(
+                "SELECT count(*) FROM documents WHERE owner_id = %s", (owner_id,)
+            ).fetchone()
+            if count >= max_documents:
+                raise TooManyDocuments
+            doc_id, created_at = conn.execute(
+                "INSERT INTO documents (owner_id, filename) VALUES (%s, %s) "
+                "RETURNING id, created_at",
+                (owner_id, filename),
+            ).fetchone()
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO chunks (file_path, heading, chunk_index, content, content_hash, "
+                    "embedding, document_id, owner_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    [
+                        (
+                            c.file_path,
+                            c.heading,
+                            c.chunk_index,
+                            c.content,
+                            # UNIQUE column: the document id keeps equal text of two uploads apart.
+                            hashlib.sha256(
+                                f"{doc_id}\0{c.chunk_index}\0{c.content}".encode()
+                            ).hexdigest(),
+                            v,
+                            doc_id,
+                            owner_id,
+                        )
+                        for c, v in zip(chunks, vectors, strict=True)
+                    ],
+                )
+        return StoredDocument(doc_id, filename, created_at, len(chunks))
+
+    def delete_document(self, owner_id: UUID, document_id: int) -> bool:
+        with self._connect() as conn:
+            # The chunks go with it: chunks.document_id is ON DELETE CASCADE.
+            row = conn.execute(
+                "DELETE FROM documents WHERE id = %s AND owner_id = %s RETURNING id",
+                (document_id, owner_id),
+            ).fetchone()
+        return row is not None
 
     def log_llm_call(self, call: LLMCall) -> None:
         with self._connect() as conn:

@@ -2,18 +2,23 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException
+import numpy as np
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
+from mnemonic.documents import DocumentError, extract_text, safe_filename
+from mnemonic.ingest.chunker import Chunk as NewChunk
+from mnemonic.ingest.chunker import Tokenizer, chunk_markdown
+from mnemonic.ingest.embedder import embed_documents, get_tokenizer
 from mnemonic.limits import SlidingWindowLimiter
 from mnemonic.llm.base import InvalidLLMOutput, LLMProvider, Usage
 from mnemonic.llm.factory import build_provider, describe_provider, model_name
@@ -40,7 +45,7 @@ from mnemonic.security import (
     require_api_key,
     spend_llm_budget,
 )
-from mnemonic.store import LLMCall, PgStore, Store
+from mnemonic.store import LLMCall, PgStore, Store, StoredDocument, TooManyDocuments
 
 # uvicorn configures only its own loggers; without this our INFO lines would be dropped.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -78,6 +83,17 @@ def get_provider() -> LLMProvider:
 def get_retriever() -> Retriever:
     settings = get_settings()
     return PgRetriever(settings.database_url, settings.retrieval_top_k)
+
+
+# Real models in production; tests override both, so they never load a model or touch the network.
+@lru_cache
+def get_embedder() -> Callable[[list[str]], Sequence[np.ndarray]]:
+    return embed_documents
+
+
+@lru_cache
+def get_chunk_tokenizer() -> Callable[[], Tokenizer]:
+    return get_tokenizer
 
 
 def sse(data: object, event: str | None = None) -> str:
@@ -218,7 +234,7 @@ async def chat(
     global_limiter: Annotated[SlidingWindowLimiter, Depends(get_global_limiter)],
 ) -> StreamingResponse:
     # Embedding + DB query are blocking: keep them off the event loop.
-    hits = await asyncio.to_thread(retriever, request.message)
+    hits = await asyncio.to_thread(retriever, request.message, request.owner_id)
     best = hits[0].similarity if hits else 0.0
     logger.info("retrieval: %d hits, top similarity %.3f", len(hits), best)
 
@@ -286,7 +302,11 @@ async def flashcards(
         raise HTTPException(status_code=404, detail="Answer not found in this session")
     source_ids = [s["id"] for s in message.sources or [] if isinstance(s.get("id"), int)]
     # Chunks come from the DB by the ids saved with the answer: the client sends no text.
-    chunks = await asyncio.to_thread(store.get_chunks, source_ids) if source_ids else []
+    chunks = (
+        await asyncio.to_thread(store.get_chunks, source_ids, request.owner_id)
+        if source_ids
+        else []
+    )
     if not chunks:
         raise HTTPException(status_code=422, detail="This answer has no sources to learn from")
 
@@ -333,14 +353,91 @@ async def flashcards(
 async def chunk_text(
     chunk_id: Annotated[int, PathParam(ge=1, le=2**63 - 1)],  # chunks.id is a Postgres bigint
     store: Annotated[Store, Depends(get_store)],
+    owner_id: UUID | None = None,
 ) -> dict:
     """The text behind a citation. Behind the key like everything else (the corpus is public,
-    but this endpoint must not become a free scraper)."""
-    found = await asyncio.to_thread(store.get_chunks, [chunk_id])
+    but this endpoint must not become a free scraper). Someone else's uploaded chunk answers
+    404, exactly like a missing one: ids must not be enumerable."""
+    found = await asyncio.to_thread(store.get_chunks, [chunk_id], owner_id)
     if not found:
         raise HTTPException(status_code=404, detail="Chunk not found")
     c = found[0]
     return {"id": c.id, "file": c.file_path, "heading": c.heading, "content": c.content}
+
+
+def document_json(d: StoredDocument) -> dict:
+    return {"id": d.id, "filename": d.filename, "chunks": d.chunks, "created_at": d.created_at}
+
+
+@app.post(
+    "/documents",
+    status_code=201,
+    dependencies=[Depends(require_api_key), Depends(limit_per_ip)],
+)
+async def upload_document(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    owner_id: Annotated[UUID, Form()],
+    settings: Annotated[Settings, Depends(get_settings)],
+    store: Annotated[Store, Depends(get_store)],
+    embedder: Annotated[Callable[[list[str]], Sequence[np.ndarray]], Depends(get_embedder)],
+    tokenizer: Annotated[Callable[[], Tokenizer], Depends(get_chunk_tokenizer)],
+) -> dict:
+    """Upload a .md / .txt / .pdf into the caller's own space (see ChatRequest.owner_id)."""
+    limit = settings.max_upload_bytes
+    # A cheap early "no" from the header (the body of a multipart request carries a little
+    # overhead); the real check is on the bytes below.
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit + 64 * 1024:
+        raise HTTPException(status_code=413, detail=f"The file is larger than {limit // 2**20} MB")
+    name = safe_filename(file.filename)
+    try:
+        if await asyncio.to_thread(store.count_documents, owner_id) >= (
+            settings.max_documents_per_owner
+        ):
+            raise TooManyDocuments
+        data = await file.read(limit + 1)
+        if len(data) > limit:
+            raise DocumentError(413, f"The file is larger than {limit // 2**20} MB")
+
+        def prepare() -> tuple[list[NewChunk], Sequence[np.ndarray]]:
+            # pypdf, tokenizing and embedding are CPU-bound: this runs in a worker thread.
+            text = extract_text(name, data, settings.max_pdf_pages)
+            chunks = chunk_markdown(text, name, tokenizer())
+            if not chunks:
+                raise DocumentError(422, "The file has no text")
+            return chunks, embedder([c.content for c in chunks])
+
+        chunks, vectors = await asyncio.to_thread(prepare)
+        doc = await asyncio.to_thread(
+            store.add_document, owner_id, name, chunks, vectors, settings.max_documents_per_owner
+        )
+    except DocumentError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail) from None
+    except TooManyDocuments:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You can keep at most {settings.max_documents_per_owner} documents. "
+            "Delete one first.",
+        ) from None
+    return document_json(doc)
+
+
+@app.get("/documents", dependencies=[Depends(require_api_key)])
+async def list_documents(owner_id: UUID, store: Annotated[Store, Depends(get_store)]) -> list[dict]:
+    return [document_json(d) for d in await asyncio.to_thread(store.list_documents, owner_id)]
+
+
+@app.delete("/documents/{document_id}", status_code=204, dependencies=[Depends(require_api_key)])
+async def delete_document(
+    document_id: Annotated[int, PathParam(ge=1, le=2**63 - 1)],
+    owner_id: UUID,
+    store: Annotated[Store, Depends(get_store)],
+) -> Response:
+    """Only the owner's own documents; someone else's is a plain 404."""
+    if not await asyncio.to_thread(store.delete_document, owner_id, document_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return Response(status_code=204)
 
 
 @app.get("/")

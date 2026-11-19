@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Conversation memory: how many of the latest saved messages (user + assistant) go into the
     # prompt. Only complete question/answer pairs count, so an odd value rounds down.
     history_messages: int = 6
+    # Uploads (M7a). Text-only PDFs: a scanned one has no text layer and is rejected.
+    max_upload_bytes: int = 5 * 1024 * 1024
+    max_pdf_pages: int = 50
+    max_documents_per_owner: int = 5
 
 
 @lru_cache

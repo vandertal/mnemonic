@@ -14,11 +14,19 @@ AI study assistant: ask your documents, get flashcards from text and images
   such as "how do I make it optional?" can retrieve poorly.
 - **Flashcards.** "Make flashcards" under an answer turns it into 3–5 question/answer cards (click to flip).
   The model returns JSON that is validated against a Pydantic schema (structured output); `POST /flashcards`.
+- **My documents.** Upload `.md`, `.txt` or text PDFs (<= 5 MB, <= 50 pages, <= 5 files per owner);
+  questions search the shared FastAPI docs plus your own files. `POST/GET /documents`,
+  `DELETE /documents/{id}`. Scanned (image-only) PDFs are rejected: no OCR yet.
 - **Eval and benchmark** against a plain LLM: see below.
 - Sessions persist in Postgres, access code + per-IP and global rate limits, every LLM call is logged
   (tokens, cost estimate).
 
 ## Access
+
+> **Limitation: "per user" is not real authentication.** Your documents belong to an `owner_id`, a random
+> UUID the browser generates and keeps in `localStorage` (like the session id). Anyone who knows that UUID
+> (and has the access code) can read and delete that space; clearing the browser data loses access to it.
+> Real accounts come in lab 21. Another owner's chunk answers 404 on `/chunks/{id}`, like a missing one.
 
 The service spends a small free-tier LLM quota, so it is closed behind an access code (`X-API-Key`).
 Codes are handed out **manually** by the author. The page asks for the code on the first visit and remembers

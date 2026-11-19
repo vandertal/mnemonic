@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Iterable, Sequence
+from uuid import UUID
 
 import numpy as np
 import psycopg
@@ -26,6 +27,23 @@ CREATE TABLE IF NOT EXISTS chunks (
 -- HNSW with cosine distance: matches the `<=>` operator used in queries.
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx
     ON chunks USING hnsw (embedding vector_cosine_ops);
+
+-- M7a: user uploads. Shared (FastAPI docs) chunks keep owner_id / document_id NULL.
+-- No migrations yet (Alembic: lab 21), so the change is an idempotent ALTER.
+CREATE TABLE IF NOT EXISTS documents (
+    id         bigserial PRIMARY KEY,
+    owner_id   uuid NOT NULL,
+    filename   text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS documents_owner_idx ON documents (owner_id);
+
+-- Deleting a document deletes its chunks (ON DELETE CASCADE).
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS document_id bigint
+    REFERENCES documents(id) ON DELETE CASCADE;
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS owner_id uuid;
+CREATE INDEX IF NOT EXISTS chunks_owner_idx ON chunks (owner_id);
+CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id);
 """
 
 
@@ -74,12 +92,18 @@ def count(conn: psycopg.Connection) -> int:
     return conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
 
 
-def search(conn: psycopg.Connection, query_vec: np.ndarray, k: int = 3) -> list[tuple]:
-    """Top-k by cosine similarity: (id, similarity, file_path, heading, content)."""
+def search(
+    conn: psycopg.Connection, query_vec: np.ndarray, k: int = 3, owner_id: UUID | None = None
+) -> list[tuple]:
+    """Top-k by cosine similarity: (id, similarity, file_path, heading, content).
+
+    Only shared chunks (owner_id IS NULL) and the caller's own are visible; with no owner,
+    only the shared ones."""
     return conn.execute(
         """
         SELECT id, 1 - (embedding <=> %s) AS similarity, file_path, heading, content
-        FROM chunks ORDER BY embedding <=> %s LIMIT %s
+        FROM chunks WHERE owner_id IS NULL OR owner_id = %s
+        ORDER BY embedding <=> %s LIMIT %s
         """,
-        (query_vec, query_vec, k),
+        (query_vec, owner_id, query_vec, k),
     ).fetchall()
