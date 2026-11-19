@@ -40,12 +40,17 @@ and need to understand and remember it, not just search it.
 - No mobile app.
 - No payments.
 - No training of our own LLM.
-- One ready knowledge base at first (source to be chosen), not "all of the internet".
+- One ready knowledge base at first (the FastAPI documentation), not "all of the internet".
+
+## Decided
+
+- Ready knowledge base: **FastAPI documentation** (Markdown, MIT license) — reasons in `docs/labs/lab-31.md`.
+- Default LLM: **Gemini free tier**. The provider is switched via `.env` (`LLM_PROVIDER`);
+  local Ollama and a paid cloud API are options behind the same interface.
 
 ## Open questions
 
-- Which ready knowledge base: a Wikipedia subset, a programming documentation set, or something else?
-- Which LLM provider by default (cheap cloud model vs local Ollama)?
+None right now.
 
 ## Backlog (after the course)
 

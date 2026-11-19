@@ -27,4 +27,4 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 
 ## Current lab
 
-Not started. Next: lab 31 — milestones will be written in `docs/labs/lab-31.md`.
+**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). Next: M1 Skeleton.
