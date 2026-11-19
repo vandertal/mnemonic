@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash-lite"
     # Max seconds to wait for the next token (the first one included) before giving up.
     llm_timeout_seconds: float = 30.0
+    # Postgres (Neon) connection string with the pgvector extension available.
+    database_url: str = ""
 
 
 @lru_cache
