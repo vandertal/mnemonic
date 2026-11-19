@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import random
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 
 from mnemonic.llm.base import LLMProvider, Usage
@@ -60,3 +60,28 @@ async def stream_with_retry(
             if on_retry:
                 on_retry()
             await _sleep(delay)
+
+
+async def call_with_retry[T](
+    call: Callable[[], Awaitable[T]], on_retry: Callable[[], None] | None = None
+) -> T:
+    """Same policy as stream_with_retry for a non-streaming call: retry 429/503 with backoff.
+    There is no "first token" here: nothing is sent to the client until the call returns."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return await call()
+        except Exception as exc:
+            if attempt == MAX_ATTEMPTS or not is_retryable(exc):
+                raise
+            delay = BASE_DELAY * 2 ** (attempt - 1) + random.uniform(0, 0.5)
+            logger.warning(
+                "LLM call failed (%s), retry %d/%d in %.1fs",
+                getattr(exc, "code", type(exc).__name__),
+                attempt,
+                MAX_ATTEMPTS - 1,
+                delay,
+            )
+            if on_retry:
+                on_retry()
+            await _sleep(delay)
+    raise AssertionError("unreachable")  # the loop returns or raises

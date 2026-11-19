@@ -24,6 +24,14 @@
     .chunk { margin: .4rem 0; padding: .5rem; background: #fff; border: 1px solid #ddd;
              border-radius: .4rem; font-size: .8rem; white-space: pre-wrap;
              overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
+    button.make { margin-top: .5rem; padding: .3rem .7rem; font-size: .9rem; }
+    .cards { display: grid; gap: .5rem; margin-top: .5rem; white-space: normal; }
+    .card { all: unset; cursor: pointer; display: block; padding: .6rem .8rem; background: #fff;
+            border: 1px solid #ccc; border-radius: .5rem; overflow-wrap: anywhere;
+            white-space: pre-wrap; }
+    .card:focus-visible { outline: 2px solid #1a56c4; }
+    .card.flipped { background: #eaf6ea; }
+    .card small { display: block; margin-top: .3rem; color: #666; }
     form { position: sticky; bottom: 0; display: flex; gap: .5rem; padding: .75rem 0;
            background: #fff; border-top: 1px solid #ddd; }
     input { flex: 1; min-width: 0; padding: .6rem; font-size: 1rem; } /* 16px: no iOS zoom */
@@ -107,6 +115,70 @@
       bubble.appendChild(list);
     }
 
+    // "Make flashcards" under an answer that has sources (a refusal has nothing to learn from).
+    function renderActions(bubble, messageId, sources) {
+      if (!messageId || !sources || !sources.length) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "make";
+      button.textContent = "Make flashcards";
+      const box = document.createElement("div"); // the cards, or an error text
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        button.textContent = "Making flashcards…";
+        box.replaceChildren();
+        try {
+          const response = await api("/flashcards", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, message_id: messageId }),
+          });
+          if (!response.ok) {
+            // 404 / 422 / 502 carry a readable `detail`; 429 and the rest use the generic text.
+            let text = describeHttpError(response);
+            if ([404, 422, 502].includes(response.status)) {
+              try { text = (await response.json()).detail || text; } catch {}
+            }
+            throw new Error(text);
+          }
+          renderCards(box, (await response.json()).cards, sources);
+          button.textContent = "Make flashcards again";
+        } catch (err) {
+          box.textContent = err instanceof TypeError ? "No connection to the server." : err.message;
+          button.textContent = "Make flashcards";
+        } finally {
+          button.disabled = false;
+        }
+      });
+      bubble.append(button, box);
+    }
+
+    // A card shows the question; a click flips it to the answer and back.
+    function renderCards(box, cards, sources) {
+      const list = document.createElement("div");
+      list.className = "cards";
+      for (const c of cards) {
+        const el = document.createElement("button");
+        el.type = "button";
+        el.className = "card";
+        const src = sources.find((s) => s.id === c.source_chunk_id);
+        let flipped = false;
+        const draw = () => {
+          el.classList.toggle("flipped", flipped);
+          el.textContent = (flipped ? "A: " : "Q: ") + (flipped ? c.answer : c.question);
+          if (flipped && src) {
+            const note = document.createElement("small");
+            note.textContent = "Source: " + src.file_path;
+            el.appendChild(note);
+          }
+        };
+        el.addEventListener("click", () => { flipped = !flipped; draw(); });
+        draw();
+        list.appendChild(el);
+      }
+      box.replaceChildren(list);
+    }
+
     // Access code: asked once, kept in localStorage, sent as X-API-Key.
     function askKey() {
       const key = (prompt("Access code:") || "").trim();
@@ -155,7 +227,9 @@
         const response = await api(`/sessions/${sessionId}/messages`);
         if (!response.ok) throw new Error(describeHttpError(response));
         for (const m of await response.json()) {
-          renderSources(addMessage(m.role, m.content), m.sources);
+          const bubble = addMessage(m.role, m.content);
+          renderSources(bubble, m.sources);
+          if (m.role === "assistant") renderActions(bubble, m.id, m.sources);
         }
       } catch (err) {
         addMessage("assistant error", "Could not load the chat history: " + err.message);
@@ -166,6 +240,7 @@
       addMessage("user", question);
       const bubble = addMessage("assistant");
       let answer = "";
+      let sources = [];
       const fail = (text) => {
         bubble.classList.add("error");
         bubble.textContent = answer ? answer + "\n\n" + text : text;
@@ -197,7 +272,10 @@
           for (const block of blocks) {
             const { event, data } = parseEvent(block);
             if (event === "error") return fail(data);
-            if (event === "sources") renderSources(bubble, data);
+            if (event === "sources") {
+              sources = data;
+              renderSources(bubble, data);
+            } else if (event === "done") renderActions(bubble, data.message_id, sources);
             else if (event === "message") {
               answer += data;
               bubble.firstChild

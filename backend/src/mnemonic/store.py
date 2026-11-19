@@ -45,6 +45,7 @@ class StoredMessage:
     content: str
     sources: list[dict] | None
     created_at: datetime
+    id: int = 0  # messages.id; last so that positional construction stays valid
 
 
 @dataclass(frozen=True)
@@ -75,8 +76,8 @@ class Store(Protocol):
 
     def add_message(
         self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
-    ) -> None:
-        """Append a message; the session row is created on first use."""
+    ) -> int:
+        """Append a message and return its id; the session row is created on first use."""
         ...
 
     def get_messages(self, session_id: UUID) -> list[StoredMessage]: ...
@@ -105,20 +106,22 @@ class PgStore:
 
     def add_message(
         self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
-    ) -> None:
+    ) -> int:
         with self._connect() as conn:  # one transaction: the session row and the message
             conn.execute(
                 "INSERT INTO sessions (id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
             )
-            conn.execute(
-                "INSERT INTO messages (session_id, role, content, sources) VALUES (%s, %s, %s, %s)",
+            row = conn.execute(
+                "INSERT INTO messages (session_id, role, content, sources) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
                 (session_id, role, content, None if sources is None else Jsonb(sources)),
-            )
+            ).fetchone()
+        return row[0]
 
     def get_messages(self, session_id: UUID) -> list[StoredMessage]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT role, content, sources, created_at FROM messages "
+                "SELECT role, content, sources, created_at, id FROM messages "
                 "WHERE session_id = %s ORDER BY id",
                 (session_id,),
             ).fetchall()

@@ -15,12 +15,25 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
 from mnemonic.limits import SlidingWindowLimiter
-from mnemonic.llm.base import LLMProvider, Usage
+from mnemonic.llm.base import InvalidLLMOutput, LLMProvider, Usage
 from mnemonic.llm.factory import build_provider, describe_provider, model_name
-from mnemonic.llm.retry import stream_with_retry
-from mnemonic.rag import REFUSAL, build_messages, select_history, valid_citations
+from mnemonic.llm.retry import call_with_retry, stream_with_retry
+from mnemonic.rag import (
+    REFUSAL,
+    build_flashcard_messages,
+    build_messages,
+    check_source_ids,
+    select_history,
+    valid_citations,
+)
 from mnemonic.retrieval import Hit, PgRetriever, Retriever
-from mnemonic.schemas import ChatRequest, ClientMessage, Message
+from mnemonic.schemas import (
+    ChatRequest,
+    ClientMessage,
+    FlashcardRequest,
+    FlashcardSet,
+    Message,
+)
 from mnemonic.security import (
     get_global_limiter,
     limit_per_ip,
@@ -75,14 +88,14 @@ def sse(data: object, event: str | None = None) -> str:
 
 async def save_message(
     store: Store, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
-) -> None:
-    await asyncio.to_thread(store.add_message, session_id, role, content, sources)
+) -> int:
+    return await asyncio.to_thread(store.add_message, session_id, role, content, sources)
 
 
 async def refusal_stream(store: Store, session_id: UUID) -> AsyncIterator[str]:
     yield sse(REFUSAL)
-    await save_message(store, session_id, "assistant", REFUSAL, [])
-    yield sse("", event="done")
+    message_id = await save_message(store, session_id, "assistant", REFUSAL, [])
+    yield sse({"message_id": message_id}, event="done")
 
 
 async def log_llm_call(
@@ -184,13 +197,14 @@ async def event_stream(
         {"id": h.id, "file_path": h.file_path, "heading": h.heading, "similarity": h.similarity}
         for h in valid_citations("".join(answer), hits)
     ]
+    message_id: int | None = None
     try:
-        await save_message(store, session_id, "assistant", "".join(answer), sources)
+        message_id = await save_message(store, session_id, "assistant", "".join(answer), sources)
     except Exception:
         # The user already has the answer on screen; losing history is the lesser evil.
         logger.exception("could not save the assistant message")
     yield sse(sources, event="sources")
-    yield sse("", event="done")
+    yield sse({"message_id": message_id}, event="done")  # None if saving failed
 
 
 # Order matters: the key is checked first, so unauthenticated requests never touch the limiter.
@@ -239,9 +253,80 @@ async def session_messages(
     """Chat history, oldest first. An unknown session is just an empty history."""
     stored = await asyncio.to_thread(store.get_messages, session_id)
     return [
-        {"role": m.role, "content": m.content, "sources": m.sources, "created_at": m.created_at}
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "sources": m.sources,
+            "created_at": m.created_at,
+        }
         for m in stored
     ]
+
+
+# Non-streaming: the whole call may include retries (429/503 backoff) and one repeat on invalid
+# JSON, so it gets a few single-call timeouts, not one.
+FLASHCARDS_TIMEOUT_FACTOR = 3
+
+
+@app.post("/flashcards", dependencies=[Depends(require_api_key), Depends(limit_per_ip)])
+async def flashcards(
+    request: FlashcardRequest,
+    provider: Annotated[LLMProvider, Depends(get_provider)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    store: Annotated[Store, Depends(get_store)],
+    global_limiter: Annotated[SlidingWindowLimiter, Depends(get_global_limiter)],
+) -> FlashcardSet:
+    """3-5 flashcards from one stored assistant answer and the chunks it cited."""
+    stored = await asyncio.to_thread(store.get_messages, request.session_id)
+    message = next(
+        (m for m in stored if m.id == request.message_id and m.role == "assistant"), None
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Answer not found in this session")
+    source_ids = [s["id"] for s in message.sources or [] if isinstance(s.get("id"), int)]
+    # Chunks come from the DB by the ids saved with the answer: the client sends no text.
+    chunks = await asyncio.to_thread(store.get_chunks, source_ids) if source_ids else []
+    if not chunks:
+        raise HTTPException(status_code=422, detail="This answer has no sources to learn from")
+
+    spend_llm_budget(global_limiter)  # same service-wide budget as /chat
+    messages = build_flashcard_messages(message.content, chunks)
+    usage, retries = Usage(), 0
+
+    def count_retry() -> None:
+        nonlocal retries
+        retries += 1
+
+    cards: FlashcardSet | None = None
+    detail = "The model failed to make flashcards. Please try again."
+    started = time.perf_counter()
+    try:
+        async with asyncio.timeout(settings.llm_timeout_seconds * FLASHCARDS_TIMEOUT_FACTOR):
+            cards = await call_with_retry(
+                lambda: provider.generate_json(messages, FlashcardSet, usage),
+                on_retry=count_retry,
+            )
+    except InvalidLLMOutput:
+        detail = "The model returned flashcards in a wrong format twice. Please try again."
+    except TimeoutError:
+        detail = "The model did not respond in time. It may be overloaded — please try again."
+    except Exception:
+        logger.exception("flashcards: LLM call failed")
+    await log_llm_call(
+        store,
+        settings,
+        request.session_id,
+        messages,
+        cards.model_dump_json() if cards else "",
+        usage,
+        retries,
+        round((time.perf_counter() - started) * 1000),
+        ok=cards is not None,
+    )
+    if cards is None:
+        raise HTTPException(status_code=502, detail=detail)
+    return check_source_ids(cards, {c.id for c in chunks})
 
 
 @app.get("/chunks/{chunk_id}", dependencies=[Depends(require_api_key)])

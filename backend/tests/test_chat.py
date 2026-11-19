@@ -89,7 +89,7 @@ def test_chat_streams_tokens_then_done(client):
         ("message", "Hello"),
         ("message", " wor\nld"),
         ("sources", []),
-        ("done", ""),
+        ("done", {"message_id": 2}),  # the user question has id 1
     ]
 
 
@@ -163,7 +163,7 @@ def test_below_threshold_answers_i_dont_know_without_calling_llm():
     client, retriever, provider = rag_client([make_hit(1, similarity=0.3)])
     response = ask(client, "What is the best pizza recipe?")
 
-    assert parse_events(response.text) == [("message", REFUSAL), ("done", "")]
+    assert parse_events(response.text) == [("message", REFUSAL), ("done", {"message_id": 2})]
     assert retriever.questions == ["What is the best pizza recipe?"]
     assert provider.calls == []
 

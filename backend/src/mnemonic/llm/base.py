@@ -1,8 +1,17 @@
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from pydantic import BaseModel, ValidationError
+
 from mnemonic.schemas import Message
+
+logger = logging.getLogger(__name__)
+
+
+# One retry on invalid JSON: models sometimes break the format once, rarely twice in a row.
+JSON_ATTEMPTS = 2
 
 
 @dataclass
@@ -15,7 +24,34 @@ class Usage:
     tokens_out: int | None = None
 
 
+class InvalidLLMOutput(Exception):
+    """The model kept returning JSON that does not match the schema."""
+
+
 class LLMProvider(Protocol):
-    """Anything that can turn a conversation into a stream of text tokens."""
+    """Anything that can turn a conversation into a stream of text tokens, or into an object."""
 
     def stream(self, messages: list[Message], usage: Usage | None = None) -> AsyncIterator[str]: ...
+
+    async def generate_json[T: BaseModel](
+        self, messages: list[Message], schema: type[T], usage: Usage | None = None
+    ) -> T:
+        """Structured output: an instance of `schema`, or InvalidLLMOutput after 2 bad tries."""
+        ...
+
+
+async def parse_json_with_retry[T: BaseModel](
+    complete: Callable[[], Awaitable[str]], schema: type[T]
+) -> T:
+    """Call `complete` (returns raw JSON text) until it validates against `schema`.
+
+    Shared by all providers, so "what is valid" and "how often we retry" live in one place."""
+    for attempt in range(1, JSON_ATTEMPTS + 1):
+        raw = await complete()
+        try:
+            return schema.model_validate_json(raw)
+        except ValidationError as exc:
+            logger.warning(
+                "LLM returned invalid JSON (attempt %d/%d): %s", attempt, JSON_ATTEMPTS, exc
+            )
+    raise InvalidLLMOutput(f"The model did not return valid {schema.__name__} JSON")

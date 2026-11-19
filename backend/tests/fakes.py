@@ -52,16 +52,19 @@ class MemoryStore:
         self.llm_calls: list[LLMCall] = []
         self.schema_initialized = False
         self.chunks: dict[int, Chunk] = {}
+        self._next_id = 0
 
     def init_schema(self) -> None:
         self.schema_initialized = True
 
     def add_message(
         self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
-    ) -> None:
+    ) -> int:
+        self._next_id += 1
         self.messages.setdefault(session_id, []).append(
-            StoredMessage(role, content, sources, datetime.now(UTC))
+            StoredMessage(role, content, sources, datetime.now(UTC), self._next_id)
         )
+        return self._next_id
 
     def get_messages(self, session_id: UUID) -> list[StoredMessage]:
         return list(self.messages.get(session_id, []))
