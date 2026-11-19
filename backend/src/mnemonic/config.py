@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Below the threshold the app answers "I don't know" without calling the LLM.
     retrieval_top_k: int = 5
     similarity_threshold: float = 0.77
+    # Conversation memory: how many of the latest saved messages (user + assistant) go into the
+    # prompt. Only complete question/answer pairs count, so an odd value rounds down.
+    history_messages: int = 6
 
 
 @lru_cache

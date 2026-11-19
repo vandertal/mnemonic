@@ -17,7 +17,7 @@ from mnemonic.limits import SlidingWindowLimiter
 from mnemonic.llm.base import LLMProvider, Usage
 from mnemonic.llm.factory import build_provider, describe_provider, model_name
 from mnemonic.llm.retry import stream_with_retry
-from mnemonic.rag import REFUSAL, build_messages, valid_citations
+from mnemonic.rag import REFUSAL, build_messages, select_history, valid_citations
 from mnemonic.retrieval import Hit, PgRetriever, Retriever
 from mnemonic.schemas import ChatRequest, ClientMessage, Message
 from mnemonic.security import (
@@ -212,13 +212,17 @@ async def chat(
         # Only a real LLM call spends the service-wide budget: "I don't know" is free.
         # Raised before anything is saved or streamed, so the client can simply retry.
         spend_llm_budget(global_limiter)
+    # History is read BEFORE the current question is saved, so it never contains it.
+    stored = await asyncio.to_thread(store.get_messages, request.session_id)
+    history = select_history(stored, settings.history_messages)
     # Saved only now, when the request is going to be answered (or refused) for sure.
     await save_message(store, request.session_id, "user", request.message)
     if refuse:
         body = refusal_stream(store, request.session_id)  # no LLM call: nothing relevant found
     else:
-        # For now the model sees only the current question; conversation memory is M6.
-        messages = build_messages([ClientMessage(role="user", content=request.message)], hits)
+        # Retrieval used only the current question; the model also sees the recent turns.
+        current = ClientMessage(role="user", content=request.message)
+        messages = build_messages([*history, current], hits)
         body = event_stream(provider, messages, hits, settings, store, request.session_id)
     return StreamingResponse(
         body,
