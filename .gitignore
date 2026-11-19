@@ -228,3 +228,6 @@ node_modules/
 frontend/dist/
 .vite/
 npm-debug.log*
+
+# Raw ingest data (cloned docs)
+backend/data/
