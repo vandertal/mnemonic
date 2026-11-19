@@ -17,6 +17,8 @@ services:
     envVars:
       - key: FASTEMBED_CACHE_PATH
         value: /opt/render/project/src/backend/.cache/fastembed
+      - key: APP_API_KEY
+        sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: DATABASE_URL

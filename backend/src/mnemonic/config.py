@@ -6,6 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
+    # Shared secret the client must send in the X-API-Key header. The app refuses to start
+    # without it, so a deploy can never be accidentally open to everyone.
+    app_api_key: str = ""
+    # Per-IP limit (requests per minute) and the service-wide LLM budget (LLM calls per minute).
+    # The free Gemini tier allows only a few calls per minute for the whole project.
+    rate_limit_per_minute: int = 10
+    global_rpm: int = 5
+
     llm_provider: str = "fake"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"

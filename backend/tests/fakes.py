@@ -6,6 +6,9 @@ from mnemonic.retrieval import Hit
 from mnemonic.schemas import Message
 from mnemonic.store import LLMCall, StoredMessage
 
+KEY = "test-key"
+AUTH = {"X-API-Key": KEY}
+
 
 def make_hit(id: int, similarity: float = 0.9) -> Hit:
     return Hit(

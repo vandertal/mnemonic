@@ -12,11 +12,18 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
+from mnemonic.limits import SlidingWindowLimiter
 from mnemonic.llm.base import LLMProvider
 from mnemonic.llm.factory import build_provider, describe_provider
 from mnemonic.rag import REFUSAL, build_messages, valid_citations
 from mnemonic.retrieval import Hit, PgRetriever, Retriever
 from mnemonic.schemas import ChatRequest, ClientMessage, Message
+from mnemonic.security import (
+    get_global_limiter,
+    limit_per_ip,
+    require_api_key,
+    spend_llm_budget,
+)
 from mnemonic.store import PgStore, Store
 
 # uvicorn configures only its own loggers; without this our INFO lines would be dropped.
@@ -28,8 +35,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    logger.info("LLM provider: %s", describe_provider(get_settings()))
-    # Resolve through dependency_overrides so tests can swap the store without a database.
+    # Resolved through dependency_overrides like the store below, so tests control the settings.
+    settings = app.dependency_overrides.get(get_settings, get_settings)()
+    if not settings.app_api_key:
+        raise RuntimeError("APP_API_KEY is not set (see backend/.env.example)")
+    logger.info("LLM provider: %s", describe_provider(settings))
     store = app.dependency_overrides.get(get_store, get_store)()
     await asyncio.to_thread(store.init_schema)
     yield
@@ -125,13 +135,15 @@ async def event_stream(
     yield sse("", event="done")
 
 
-@app.post("/chat")
+# Order matters: the key is checked first, so unauthenticated requests never touch the limiter.
+@app.post("/chat", dependencies=[Depends(require_api_key), Depends(limit_per_ip)])
 async def chat(
     request: ChatRequest,
     provider: Annotated[LLMProvider, Depends(get_provider)],
     settings: Annotated[Settings, Depends(get_settings)],
     retriever: Annotated[Retriever, Depends(get_retriever)],
     store: Annotated[Store, Depends(get_store)],
+    global_limiter: Annotated[SlidingWindowLimiter, Depends(get_global_limiter)],
 ) -> StreamingResponse:
     # Embedding + DB query are blocking: keep them off the event loop.
     hits = await asyncio.to_thread(retriever, request.message)
@@ -139,6 +151,10 @@ async def chat(
     logger.info("retrieval: %d hits, top similarity %.3f", len(hits), best)
 
     refuse = not hits or best < settings.similarity_threshold
+    if not refuse:
+        # Only a real LLM call spends the service-wide budget: "I don't know" is free.
+        # Raised before anything is saved or streamed, so the client can simply retry.
+        spend_llm_budget(global_limiter)
     # Saved only now, when the request is going to be answered (or refused) for sure.
     await save_message(store, request.session_id, "user", request.message)
     if refuse:
@@ -156,7 +172,7 @@ async def chat(
     )
 
 
-@app.get("/sessions/{session_id}/messages")
+@app.get("/sessions/{session_id}/messages", dependencies=[Depends(require_api_key)])
 async def session_messages(
     session_id: UUID, store: Annotated[Store, Depends(get_store)]
 ) -> list[dict]:

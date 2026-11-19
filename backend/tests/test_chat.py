@@ -12,7 +12,7 @@ from mnemonic.main import app, get_provider, get_retriever, get_store
 from mnemonic.rag import REFUSAL
 from mnemonic.schemas import Message
 
-from .fakes import FakeRetriever, MemoryStore, RecordingProvider, make_hit
+from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, RecordingProvider, make_hit
 
 SESSION = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
@@ -57,11 +57,11 @@ def store():
 @pytest.fixture
 def client(store):
     app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, llm_timeout_seconds=0.2, similarity_threshold=0.5
+        _env_file=None, app_api_key=KEY, llm_timeout_seconds=0.2, similarity_threshold=0.5
     )
     app.dependency_overrides[get_retriever] = lambda: FakeRetriever([make_hit(1)])
     app.dependency_overrides[get_store] = lambda: store
-    with TestClient(app) as c:
+    with TestClient(app, headers=AUTH) as c:
         yield c
     app.dependency_overrides.clear()
 
@@ -148,11 +148,11 @@ def rag_client(hits, answer="ok", threshold=0.5):
     retriever, provider = FakeRetriever(hits), RecordingProvider(answer)
     app.dependency_overrides[get_store] = MemoryStore
     app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, similarity_threshold=threshold
+        _env_file=None, app_api_key=KEY, similarity_threshold=threshold
     )
     app.dependency_overrides[get_retriever] = lambda: retriever
     app.dependency_overrides[get_provider] = lambda: provider
-    return TestClient(app), retriever, provider
+    return TestClient(app, headers=AUTH), retriever, provider
 
 
 def ask(client, text="How do I use Query?"):
