@@ -80,3 +80,8 @@ def test_empty_sections_are_skipped():
 def test_invalid_overlap_rejected():
     with pytest.raises(ValueError):
         chunk_markdown("x", "f.md", TOK, max_tokens=10, overlap=10)
+
+
+def test_mkdocs_anchor_is_stripped_from_heading():
+    chunks = chunk_markdown("# Title { #title }\n\n## Sub { #sub-id }\n\ntext", "f.md", TOK)
+    assert chunks[0].heading == "Title > Sub"

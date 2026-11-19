@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+_ANCHOR = re.compile(r"\s*\{\s*#[^}]*\}\s*$")  # MkDocs "{ #custom-id }" suffix
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 
@@ -48,7 +49,7 @@ def _sections(markdown: str) -> list[tuple[str, str]]:
             level = len(match.group(1))
             while path and path[-1][0] >= level:
                 path.pop()
-            path.append((level, match.group(2)))
+            path.append((level, _ANCHOR.sub("", match.group(2))))
         else:
             body.append(line)
     flush()
