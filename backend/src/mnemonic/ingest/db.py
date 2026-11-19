@@ -75,10 +75,10 @@ def count(conn: psycopg.Connection) -> int:
 
 
 def search(conn: psycopg.Connection, query_vec: np.ndarray, k: int = 3) -> list[tuple]:
-    """Top-k by cosine similarity: (similarity, file_path, heading, content)."""
+    """Top-k by cosine similarity: (id, similarity, file_path, heading, content)."""
     return conn.execute(
         """
-        SELECT 1 - (embedding <=> %s) AS similarity, file_path, heading, content
+        SELECT id, 1 - (embedding <=> %s) AS similarity, file_path, heading, content
         FROM chunks ORDER BY embedding <=> %s LIMIT %s
         """,
         (query_vec, query_vec, k),
