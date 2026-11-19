@@ -13,18 +13,18 @@ Each item shows the milestone that closes it.
 - [x] Web chat UI → **M1**
 - [x] Streamed LLM responses → **M1**
 - [x] RAG over the domain documents → **M2 + M3**
-- [ ] Source citations next to answers → **M3**
+- [x] Source citations next to answers → **M3** (data), **M5b** (the page renders the list)
 - [x] 5+ seed questions give useful, accurate answers → **M3**
 - [x] Deployed to a public URL → **M4**
 
 ### Standard — "It's a Real Mini-Product"
 
-- [ ] Session history persists across reloads (Postgres) → **M5** (backend done in M5a; the UI does not restore it yet)
+- [x] Session history persists across reloads (Postgres) → **M5** (backend M5a, UI M5b)
 - [x] "I don't know" handling when retrieval fails (similarity threshold) → **M3**
-- [ ] Eval set: `eval.json` with 10 Q&A pairs + run script, results recorded → **M5**
+- [x] Eval set: `eval.json` with 10 Q&A pairs + run script, results recorded → **M5** (M5b)
 - [x] Rate limit (per IP) + API-key gate → **M5** (backend, M5a)
 - [x] Every LLM call logged (tokens, cost estimate) → **M5** (M5a)
-- [ ] Polished UI, works on mobile → **M5**
+- [x] Polished UI, works on mobile → **M5** (M5b: minimal, no polish beyond the mobile layout)
 - [ ] 5+ real users → **M5**
 
 ### Advanced — side quests
@@ -47,11 +47,11 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 - [ ] Hard billing limit on the LLM provider: billing not connected (free tier) → **M1**
 - [x] Rate limit + auth in place (no anonymous unlimited use) → **M5** (M5a; to be re-checked on the live URL after deploy)
 - [x] Streaming works in production → **M4**
-- [ ] Mobile UI works → **M5**
+- [x] Mobile UI works → **M5** (M5b)
 - [x] Citations point to real chunks (cited IDs validated) → **M3**
 - [x] "I don't know" tested with off-domain questions → **M3** (+ eval in **M5**)
 - [x] No secrets in source → **M1** (`.env.example`), re-checked in **M4**
-- [ ] README documents the eval methodology and results → **M5**
+- [x] README documents the eval methodology and results → **M5** (M5b)
 
 ## 2. Milestones
 
@@ -178,7 +178,7 @@ Done. Live: https://mnemonic-y1js.onrender.com (streaming checked with a real /c
 
 ### M5 — Standard
 
-**M5a — backend ✅ done** (M5b: UI, eval, real users — not started)
+**M5a — backend ✅ done. M5b — UI + eval + docs ✅ done** (still open: 5+ real users, provider billing limit)
 
 - [x] Sessions and messages in Postgres (`sessions`, `messages`, `llm_calls`; `CREATE TABLE IF NOT EXISTS` at startup).
       `POST /chat {session_id, message}` (the client generates the UUID); `GET /sessions/{id}/messages`.
@@ -189,8 +189,34 @@ Done. Live: https://mnemonic-y1js.onrender.com (streaming checked with a real /c
 - [x] Retry on 503/429 before the first token (3 attempts, 1s/2s backoff + jitter).
 - [x] `llm_calls` log: tokens in/out (provider usage, else ~chars/4 and `+est` in `status`), cost from
       `PRICE_IN_PER_M` / `PRICE_OUT_PER_M`, latency, status `ok` / `retried` / `error`.
-- Known gaps: the web page still sends the old payload and no key (M5b); the model sees only the current
-  question (conversation memory is M6); a client disconnect mid-stream is not logged; counters are per process.
+- Known gaps: the model sees only the current question (conversation memory is M6); a client disconnect
+  mid-stream is not logged; counters are per process. (The old-payload/no-key page gap was closed in M5b.)
+
+**M5b — Results**
+
+Done:
+
+- [x] UI (`static/index.html`, plain HTML/JS/CSS, no dependencies): access code in `localStorage` sent as
+      `X-API-Key` (401 → erased and asked again); `session_id` from `crypto.randomUUID()`, history restored via
+      `GET /sessions/{id}/messages`, "New chat" button; `POST /chat {session_id, message}`; `sources` rendered as
+      a plain "file › heading" list under the answer (clickable is M6); human error text for 429 (shows
+      `Retry-After`), 401 and a dropped connection; mobile layout (viewport meta, sticky input, 16px font, wrapping).
+- [x] Eval: `eval/eval.json` (7 on-topic + 3 off-domain; files and keywords checked against the real chunks),
+      `eval/run_eval.py` (HTTP, fresh session per question, pauses by `GLOBAL_RPM`, one retry on 429, no LLM judge),
+      `eval/results.md`.
+- [x] README: Access, Eval (method, results, limitations).
+
+Eval run (2026-11-19, local server, `gemini-3.5-flash-lite`): retrieval hit **6/7**, keywords **93%**,
+IDK **3/3**. The miss: background tasks cited `reference/background.md` instead of `tutorial/background-tasks.md`
+(both relevant). No false "I don't know" on on-topic questions, so the threshold stays 0.77.
+
+Not done / holes (from the M5a report and M5b):
+
+- Rate limiters (per-IP and global) live **in process memory**: reset on restart, not shared between instances.
+- A client disconnect mid-stream is **not logged** to `llm_calls` (the generator is closed at a `yield`).
+- If the LLM fails, the user's question is already saved but has **no answer** in the history.
+- Mobile layout was written to the spec (375px) but not yet checked on a real phone.
+- 5+ real users and the provider billing limit: still open.
 
 - Sessions and messages stored in Postgres; chat restored after reload.
 - API-key header gate + per-IP rate limit.
