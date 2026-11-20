@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# Mnemonic — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite + Tailwind SPA.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+cd frontend
+npm install
+cp .env.example .env        # VITE_API_URL = backend address
+npm run dev                 # http://localhost:5173
+npm run build ; npm run lint
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Backend must allow this origin: `CORS_ORIGINS` in `backend/.env` (default `http://localhost:5173`).
+
+## Layout
+
+- `src/styles/tokens.css` — design tokens (CSS variables, light + `.dark`); the only place with colours.
+- `src/api/` — `client.ts` (X-API-Key, typed errors), `sse.ts` (stream parser), `chat.ts`.
+- `src/i18n/{uk,en}.json` — all UI strings; use `t('key')`, never literals.
+- `src/features/chat/` — streaming chat, source cards, markdown.
+
+## Deploy (Cloudflare Pages)
+
+1. Push the repo to GitHub.
+2. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → pick the repo.
+3. Build settings: root directory `frontend`, build command `npm run build`, output directory `dist`.
+4. Environment variables (production): `VITE_API_URL` = your Render URL (no trailing slash), `NODE_VERSION` = `22`.
+5. **Save and Deploy**. Copy the URL (`https://<name>.pages.dev`).
+6. Render → backend service → Environment → `CORS_ORIGINS` = that URL → save (redeploys).
+7. Open the URL, enter the access code, ask a question.
+
+`VITE_*` variables are baked in at build time: change one → redeploy the frontend.
