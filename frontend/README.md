@@ -10,6 +10,14 @@ npm run dev                 # http://localhost:5173
 npm run build ; npm run lint
 ```
 
+## Commands
+
+- `npm run dev` — prints the effective API URL first (`predev`) and warns loudly if it is missing or local.
+- `npm run smoke` — checks the backend from the SPA's point of view: CORS preflight, wrong key → 401, right key → 200, `GET /documents`.
+  Needs `SMOKE_KEY` (the access code; never printed), optional `SMOKE_ORIGIN` (default `http://localhost:5173`):
+  `$env:SMOKE_KEY = "<code>" ; npm run smoke`
+- `npm run build` · `npm run lint`
+
 Backend must allow this origin: `CORS_ORIGINS` in `backend/.env` (default `http://localhost:5173`).
 
 ## Layout
