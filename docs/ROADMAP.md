@@ -18,8 +18,8 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 ## Status
 
 - [x] 0. Setup — tools, repository, CLAUDE.md, docs
-- [ ] **31 — LLM RAG App** · core: chat over documents with citations
-- [ ] 22 — SPA Frontend · chat + documents + flashcard screen
+- [x] 31 — LLM RAG App · core: chat over documents with citations (Standard + Advanced; open: 5+ real users, hard billing limit, Ollama deferred)
+- [ ] **22 — SPA Frontend** · chat + documents + flashcard screen ← next
 - [ ] 21 — REST API With Auth · accounts, tests, CI/CD
 - [ ] 33 — Object Detection & Tracking · image flashcards
 - [ ] 34 — AI Capstone · real users, landing, metrics
@@ -27,4 +27,5 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 
 ## Current lab
 
-**Lab 31 — in progress.** Plan: [`docs/labs/lab-31.md`](labs/lab-31.md). M1 Skeleton, M2 Data, M3 RAG and M4 Deploy are done. M5 Standard: M5a (backend) and M5b (UI + eval) done; 5+ real users still open. **M6 Advanced part 1 done** (memory, clickable citations, flashcards, benchmark). **M7a uploads done** (per-owner documents; owner = client UUID, no real auth). **M7b tool use done** (calculator, agentic loop). M7c (Ollama) is DEFERRED: no access to the GPU machine.
+**Lab 31 — closed (2026-11-20), tag `lab-31`.** Plan and results: [`docs/labs/lab-31.md`](labs/lab-31.md). Open items: 5+ real users,
+hard billing limit, Ollama (M7c, deferred). **Next: lab 22 (SPA).**

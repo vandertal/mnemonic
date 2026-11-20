@@ -25,7 +25,7 @@ Each item shows the milestone that closes it.
 - [x] Rate limit (per IP) + API-key gate → **M5** (backend, M5a)
 - [x] Every LLM call logged (tokens, cost estimate) → **M5** (M5a)
 - [x] Polished UI, works on mobile → **M5** (M5b: minimal, no polish beyond the mobile layout)
-- [ ] 5+ real users → **M5**
+- [ ] 5+ real users → **M5** — NOT DONE (no real users yet; closed deliberately, to be mentioned at the defense)
 
 ### Advanced — side quests
 
@@ -44,8 +44,8 @@ Out of scope for this lab: fine-tuning, voice interface, multi-modal (images com
 
 - [x] Live URL works → **M4**
 - [x] LLM API key is server-side only, never in the browser → **M1** (design), **M4** (verified)
-- [ ] Hard billing limit on the LLM provider: billing not connected (free tier) → **M1**
-- [x] Rate limit + auth in place (no anonymous unlimited use) → **M5** (M5a; to be re-checked on the live URL after deploy)
+- [ ] Hard billing limit on the LLM provider: billing not connected (free tier) → **M1** — the intent is met (no billing attached, so no charge is possible); a real hard limit is needed only once billing is connected
+- [x] Rate limit + auth in place (no anonymous unlimited use) → **M5** (M5a; checked on the live URL after the M5 deploy)
 - [x] Streaming works in production → **M4**
 - [x] Mobile UI works → **M5** (M5b)
 - [x] Citations point to real chunks (cited IDs validated) → **M3**
@@ -366,24 +366,93 @@ Not done / holes (from the M5a report and M5b):
 
 ## 4. Reflection
 
-Answers are filled in at the end of the lab.
+Answers written at the end of the lab (2026-11-20). Numbers come from this file, `eval/results.md`
+and `eval/benchmark.md`; nothing here is estimated unless it says so.
 
 1. **Live demo:** the panel asks 5 questions; how does the model handle each?
-   _Answer: TBD_
+   _Answer:_ My own 5-question demo script, one per capability:
+   (1) an on-topic FastAPI question ("How do I enable CORS in FastAPI?") streams an answer with `[id]` citations;
+   I click a source and read the exact chunk. (2) A follow-up ("and what about credentials?") works because the
+   last 6 messages are in the prompt. (3) An off-domain question (Django, a recipe) gets "I don't know" and the LLM
+   is not called. (4) I upload my own file and ask about it: the answer cites it; the same question from a private
+   window (another `owner_id`) gets "I don't know". (5) Arithmetic over numbers in my uploaded price list: the
+   model calls the calculator and the page shows `calculator: 37 * 120 + 19 * 75 = 5865`. Weak spot to admit
+   up front: one- or two-word questions ("Fastapi") can be refused, because the threshold was tuned on full questions.
+
 2. **Walk through the pipeline** for one question — input, embedding, retrieval, prompt, LLM call, streaming, render.
-   _Answer: TBD_
+   _Answer:_ The page sends `POST /chat {session_id, owner_id, message}` with `X-API-Key`. The server checks the key
+   and the per-IP limit, rejects a client-supplied `system` role, and reads the last 6 saved messages (complete
+   question/answer pairs only). The question is embedded locally with fastembed (`bge-small-en-v1.5`, 384 dims),
+   and pgvector returns the top-5 chunks by cosine similarity, restricted to shared docs plus this owner's own
+   (`owner_id IS NULL OR owner_id = :owner`). If the best score is below 0.77 the server answers "I don't know"
+   without calling the LLM. Otherwise it builds the prompt: a server-side system message (chunks are data, not
+   instructions), the numbered chunks, the history and the question, takes one slot of the global LLM budget, and
+   streams Gemini's tokens over SSE (retry only before the first token). The cited `[id]`s are parsed and checked
+   against the retrieved ids; only real ones go out in the `sources` event. `done` carries the message id; the
+   exchange is saved and an `llm_calls` row is written. The page renders the text, the sources (click =
+   `GET /chunks/{id}`) and the "Make flashcards" button.
+
 3. **Show your eval results.** What's the score? Why is RAG better than a plain LLM?
-   _Answer: TBD_
+   _Answer:_ Live run on 2026-11-20 (10 questions, `gemini-3.5-flash-lite`): retrieval hit 7/7, keywords 93%,
+   "I don't know" on off-domain 3/3, no errors (an earlier local run: 6/7). Only 10 questions, so one question is
+   10 points. The benchmark against a plain LLM (same model, no retrieval): keywords 93% vs 100%, honest refusal
+   3/3 vs 0/3, answers with checkable source links 7/7 vs 0/7. So I do **not** claim RAG is more accurate on public
+   FastAPI docs: the model has seen them in training. What RAG adds is verifiability (every claim points to a chunk
+   I can open) and scope control. It matters most for private or new documents the model has never seen; I
+   demonstrated that qualitatively with my uploaded files (the plain model cannot know my price list), but I did
+   not measure it on the eval set.
+
 4. **What happens when the user asks an off-domain question?**
-   _Answer: TBD_
+   _Answer:_ The question is embedded and the best chunk's cosine score is compared with the threshold 0.77. Below it
+   the server returns a fixed "I don't know... Try a more specific question" message: no LLM call, no budget slot,
+   no cost, nothing to hallucinate. The threshold was chosen on data: on-topic minimum 0.808, off-topic maximum 0.739
+   (the hardest negative was "Django", same domain), so I cut in the middle of the gap. The margin is thin (~0.03),
+   and the price is false refusals on very short queries ("Fastapi", "What is the cli?"). I measured three
+   alternatives (a query prefix, adding the previous question) and none gave a clean gap, so I kept the threshold
+   and documented the limitation.
+
 5. **What does it cost** to answer one question? In tokens, and in dollars?
-   _Answer: TBD_
+   _Answer:_ Every LLM call is logged in `llm_calls` (`tokens_in`, `tokens_out`, `cost_usd`, `latency_ms`).
+   Input is the system prompt + 5 chunks (chunks are ~500 tokens by design, so a few thousand tokens in total)
+   + up to 6 history messages + the question; output is a few hundred tokens. In dollars:
+   `tokens_in/1e6 * PRICE_IN_PER_M + tokens_out/1e6 * PRICE_OUT_PER_M`. On the free tier (no billing attached) the
+   price is $0, so `cost_usd` logs 0. Refusals cost nothing; a calculator question costs up to 3 LLM calls. To quote
+   exact averages at the defense, run on Neon:
+   `SELECT count(*), avg(tokens_in), avg(tokens_out), avg(latency_ms) FROM llm_calls WHERE status LIKE 'ok%';`
+
 6. **What would you change** to scale to 1000 users? 1 million?
-   _Answer: TBD_
+   _Answer:_ Today the weakest points are: limiters live in process memory; the free Gemini quota is ~5 requests/min
+   for the whole project; Render free has 512 MB and sleeps; embedding runs on the web server's CPU; uploads are
+   indexed inside the request; "per user" is a browser UUID, not an account. For **1000 users**: real accounts
+   (lab 21) and per-user limits, limiters in a shared store (Redis), a paid LLM tier with a queue and a hard billing
+   cap, an always-on instance, indexing uploads in a background worker, caching frequent answers, a connection pool
+   for Postgres. For **1 million**: horizontal scaling behind a load balancer, a separate embedding service (or a
+   hosted embedding API), vector search that scales per tenant (pgvector HNSW filters after the search, so
+   per-owner data needs partitions or a dedicated vector DB), read replicas, cost controls (a smaller model by
+   default, caching, token budgets per user) and monitoring on `llm_calls`.
+
 7. **What's the difference** between embeddings, fine-tuning, and prompt engineering? When do you use which?
-   _Answer: TBD_
+   _Answer:_ Embeddings turn text into vectors so I can find relevant passages by meaning; they supply *knowledge*
+   at query time (RAG), which suits facts that change or are private, and updating means re-indexing, not
+   retraining. Fine-tuning changes the model's weights; it suits a stable style, format or specialised skill with
+   many examples, is expensive, and is a poor way to add facts. Prompt engineering is instructions in the prompt
+   (rules, format, "cite chunk ids", "chunks are data"); it is the cheapest and fastest, so I start there. Here: RAG
+   for the knowledge, prompting for behaviour; fine-tuning only comes in lab 33 for the vision model.
+
 8. **What was the hardest part** — chunking, retrieval, hallucinations, UI streaming, or eval?
-   _Answer: TBD_
+   _Answer:_ (Draft from the project record; replace it with your own if another part was harder for you.)
+   Retrieval and the "I don't know" threshold. Scores of different questions are not calibrated probabilities:
+   on-topic and off-topic differ by only ~0.03, and short or vague questions fall into the overlap ("What is the cli?"
+   0.721 against "Flask" 0.719), so no cut-off, prefix or concatenation fixed it. Eval was the second hardest: 10
+   questions with a keyword check cannot separate retrieval quality from citing behaviour, and the benchmark honestly
+   showed the plain model is not worse on public docs.
+
+### Open items at close
+
+- **5+ real users** — not done (nobody has tried it yet beyond the author).
+- **Hard billing limit** — billing is not connected, so no charge is possible; the limit itself is not set.
+- **Local model via Ollama (M7c)** — deferred (no access to the GPU machine); the provider interface is ready for it.
+- Known limitations are in the README (English-only embedder, short queries, multipart before the key check, calculator only after retrieval).
 
 ## 5. Risks
 

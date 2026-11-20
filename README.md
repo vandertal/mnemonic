@@ -120,6 +120,7 @@ python eval/run_eval.py     # standard library only; writes eval/results.md
 
 The one retrieval miss (background tasks): the model cited `reference/background.md` instead of
 `tutorial/background-tasks.md`. Both are relevant, so this is partly a strict-metric artefact.
+A second run against the live service (2026-11-20, same model): retrieval hit 7/7, keywords 93%, IDK 3/3.
 Full table: [eval/results.md](eval/results.md).
 
 **Honest limitations.**
