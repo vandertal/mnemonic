@@ -35,8 +35,8 @@ Each item shows the milestone that closes it.
 - [x] Citation UI (click a citation → see the source paragraph) → **M6**
 - [x] Conversational memory (earlier turns, not only retrieval) → **M6**
 - [x] Multi-document upload (per-user document spaces) → **M7a** (owner = client UUID, not real auth)
-- [ ] Tool use / agentic loop → **M7**
-- [ ] Local model via Ollama + tradeoffs write-up → **M7**
+- [x] Tool use / agentic loop → **M7b** (calculator, max 3 rounds)
+- [ ] Local model via Ollama + tradeoffs write-up → **M7c** — DEFERRED (no access to the GPU machine), not done
 
 Out of scope for this lab: fine-tuning, voice interface, multi-modal (images come in lab 33).
 
@@ -332,6 +332,30 @@ Not done / holes (from the M5a report and M5b):
   unauthenticated client can still make the server buffer up to one body (a proxy size limit would fix it);
   a 5 MB text file is ~2500 chunks, which is slow to embed on the free CPU; the pgvector HNSW index is
   filtered after the search, fine while uploads are a small part of the corpus.
+
+#### M7b — tool use ✅ done (2026-11-20; Ollama / M7c DEFERRED)
+
+- **Interface.** `LLMProvider` gets `supports_tools` (default False) and optional `stream_events(messages, tools)`
+  yielding text tokens or a `ToolCall`. Gemini uses function calling (the thought signature of a call is kept
+  and sent back); `FakeProvider(tool_script=...)` scripts rounds for tests. `supports_tools=False` -> the loop is
+  skipped, behaviour unchanged. Retry-before-first-event still applies (a tool call counts as an event).
+- **Loop** (`main.event_stream`): stream; on a `ToolCall` run the tool, append assistant-call + tool-result
+  messages, stream again; max 3 rounds, the last one offered no tools. Each round takes one slot of the global
+  LLM budget (a 429 mid-stream becomes an `error` event) and writes one `llm_calls` row. Only the first call of a
+  round is run.
+- **Calculator** (`tools.py`): `ast` whitelist (numbers, `+ - * / // % **`, unary minus, parentheses), no
+  `eval`/`exec`; <= 100 chars, |exponent| <= 100, finite result, big ints capped. Errors go back to the model as
+  tool-result text.
+- **UI/SSE:** new `tool` event `{name, args, result}`, one small line under the answer via `textContent`.
+  Tool calls are NOT stored in `messages`: the history keeps the final text only.
+- **Known limitation (kept):** the "I don't know" gate runs before the LLM, so the calculator only fires for
+  questions that passed retrieval (e.g. arithmetic over numbers in an uploaded document).
+- **Refusal text** now ends with "Try a more specific question (include the topic name)."
+- **Tests:** 134 passing (valid/precedence/injection `__import__`/`9**9**9`/1/0, loop stops at 3 rounds,
+  budget per round, no-tools provider unchanged, client still cannot send `system`/`tool` roles). **Not verified
+  live:** the Gemini function-calling path was not run against the real API (no deploy, no key use) - try one
+  arithmetic question over an uploaded document after deploy.
+- **M7c (Ollama): DEFERRED** - no access to the GPU machine; not started, not ticked.
 
 ## 3. Make it yours — why FastAPI docs
 

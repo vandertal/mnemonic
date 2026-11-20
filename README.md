@@ -17,9 +17,23 @@ AI study assistant: ask your documents, get flashcards from text and images
 - **My documents.** Upload `.md`, `.txt` or text PDFs (<= 5 MB, <= 50 pages, <= 5 files per owner);
   questions search the shared FastAPI docs plus your own files. `POST/GET /documents`,
   `DELETE /documents/{id}`. Scanned (image-only) PDFs are rejected: no OCR yet.
+- **Calculator tool.** With Gemini the model can call a calculator (agentic loop, max 3 LLM calls per
+  question) for arithmetic over numbers in the context; the call is shown as a small line under the answer
+  (`calculator: 3*12+2*7 = 50`). Parsed with `ast` (no `eval`), whitelisted operators only.
 - **Eval and benchmark** against a plain LLM: see below.
 - Sessions persist in Postgres, access code + per-IP and global rate limits, every LLM call is logged
   (tokens, cost estimate).
+
+## Known limitations
+
+- **English-only embedder.** Russian worked on a 1-chunk document; large Russian corpora are unmeasured.
+- **Short queries may be refused** (one- or two-word questions score below the threshold; measured in
+  [lab-31](docs/labs/lab-31.md)). The refusal asks for a more specific question.
+- **Multipart is parsed before the key check** on `POST /documents`: the framework reads the form before our
+  dependencies run, so an unauthenticated client can make the server parse a small upload.
+- **The calculator only works after retrieval passes.** The "I don't know" gate runs before the LLM, so the
+  tool fires only for questions that already found relevant chunks (e.g. arithmetic over numbers in an uploaded
+  document). Tool calls are not stored in the history, only the final text.
 
 ## Access
 
