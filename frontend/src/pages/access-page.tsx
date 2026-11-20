@@ -6,14 +6,18 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import { fetchHistory } from '@/api/chat'
 import { AuthError } from '@/api/errors'
+import { OfflineBanner } from '@/components/offline-banner'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/auth'
-import { setAccessCode } from '@/lib/storage'
-import { toastError } from '@/lib/errors'
+import { clearAccessCode, setAccessCode } from '@/lib/storage'
+import { toast } from 'sonner'
+
+// Any valid UUID works: an unknown session is just an empty history, so this is a cheap key check.
+const PROBE_SESSION = '00000000-0000-0000-0000-000000000000'
 
 export default function AccessPage() {
   const { t } = useTranslation()
@@ -40,22 +44,25 @@ export default function AccessPage() {
     // call, and only then flip the auth state (doing it earlier would redirect away mid-check).
     setAccessCode(code)
     try {
-      await fetchHistory()
+      await fetchHistory(PROBE_SESSION)
       signIn(code)
       navigate('/chat', { replace: true })
     } catch (e) {
       // On 401/403 the client has already cleared the code and flipped the auth state.
       if (e instanceof AuthError) setError('code', { message: 'access.wrong' })
       else {
-        toastError(e)
-        signIn(code)
-        navigate('/chat', { replace: true }) // server unreachable: let the user in, chat will show the error
+        // Unreachable server (or a 5xx): the code is NOT proven, so nobody gets in. Stay and say how to retry.
+        clearAccessCode()
+        toast.error(t('access.unreachable'))
       }
     }
   }
 
   return (
     <div className="relative grid min-h-dvh place-items-center bg-background px-4">
+      <div className="absolute inset-x-0 top-0">
+        <OfflineBanner />
+      </div>
       <div className="absolute top-4 right-4 flex gap-2">
         <LanguageSwitcher />
         <ThemeToggle />
