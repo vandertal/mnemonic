@@ -33,3 +33,20 @@ export type ChatEvent =
   | { type: 'tool'; tool: ToolEvent }
   | { type: 'done'; messageId: number | null }
   | { type: 'error'; message: string }
+
+export interface DocumentInfo {
+  id: number
+  filename: string
+  chunks: number
+  created_at: string
+}
+
+export interface Flashcard {
+  question: string
+  answer: string
+  source_chunk_id: number | null
+}
+
+export interface FlashcardSet {
+  cards: Flashcard[]
+}
