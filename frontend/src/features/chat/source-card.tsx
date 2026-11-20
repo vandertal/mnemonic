@@ -33,7 +33,7 @@ function SourceDialogBody({ source }: { source: Source }) {
   )
 }
 
-export function SourceCard({ source, index }: { source: Source; index: number }) {
+export function SourceCard({ source, index, domId }: { source: Source; index: number; domId?: string }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const state = useChunk(source.id)
@@ -42,10 +42,11 @@ export function SourceCard({ source, index }: { source: Source; index: number })
   return (
     <>
       <button
+        id={domId}
         type="button"
         onClick={() => setOpen(true)}
         aria-label={t('source.open', { n: index })}
-        className="flex w-full cursor-pointer gap-3 rounded-lg border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted"
+        className="flex w-full cursor-pointer gap-3 rounded-lg border bg-card p-3 text-left shadow-sm transition-colors hover:bg-muted data-[flash]:ring-2 data-[flash]:ring-accent"
       >
         <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent-soft text-xs font-semibold text-accent">
           {index}
