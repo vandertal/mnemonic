@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 
 from mnemonic.llm.base import LLMProvider, Usage
-from mnemonic.schemas import Message
+from mnemonic.schemas import Message, ToolCall, ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +32,22 @@ async def stream_with_retry(
     messages: list[Message],
     usage: Usage | None = None,
     on_retry: Callable[[], None] | None = None,
-) -> AsyncIterator[str]:
-    """provider.stream(), retried with exponential backoff + jitter, but ONLY until the first
-    token is yielded. After that the consumer already has part of the answer, so a retry would
-    start the text over and duplicate it: the error is raised as is."""
+    tools: list[ToolSpec] | None = None,
+) -> AsyncIterator[str | ToolCall]:
+    """provider.stream() (stream_events() when `tools` are given), retried with exponential
+    backoff + jitter, but ONLY until the first event (token or tool call) is yielded. After that
+    the consumer already has part of the answer, so a retry would start the text over and
+    duplicate it: the error is raised as is."""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         started = False
         try:
+            source = (
+                provider.stream_events(messages, tools, usage)
+                if tools is not None
+                else provider.stream(messages, usage)
+            )
             # aclosing: if the consumer stops early, the provider's HTTP stream is closed too.
-            async with aclosing(provider.stream(messages, usage)) as tokens:
+            async with aclosing(source) as tokens:
                 async for token in tokens:
                     started = True
                     yield token

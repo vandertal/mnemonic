@@ -18,6 +18,8 @@
     .error { background: #fde8e8; }
     .sources { margin: .5rem 0 0; padding-left: 1.2rem; font-size: .85rem; color: #444;
                white-space: normal; }
+    .toolnote { font-size: .8rem; color: #555; font-family: monospace; overflow-wrap: anywhere;
+                margin-top: -.4rem; }
     button.link { all: unset; cursor: pointer; color: #1a56c4; text-decoration: underline;
                   overflow-wrap: anywhere; }
     button.link:focus-visible { outline: 2px solid #1a56c4; }
@@ -344,6 +346,7 @@
       const bubble = addMessage("assistant");
       let answer = "";
       let sources = [];
+      let lastNote = null;
       const fail = (text) => {
         bubble.classList.add("error");
         bubble.textContent = answer ? answer + "\n\n" + text : text;
@@ -375,7 +378,15 @@
           for (const block of blocks) {
             const { event, data } = parseEvent(block);
             if (event === "error") return fail(data);
-            if (event === "sources") {
+            if (event === "tool") {
+              // One small line under the bubble; textContent only (args come from the model).
+              const note = document.createElement("div");
+              note.className = "toolnote";
+              const expr = data.args.expression ?? JSON.stringify(data.args);
+              note.textContent = `${data.name}: ${expr} = ${data.result}`;
+              (lastNote || bubble).after(note);
+              lastNote = note;
+            } else if (event === "sources") {
               sources = data;
               renderSources(bubble, data);
             } else if (event === "done") renderActions(bubble, data.message_id, sources);

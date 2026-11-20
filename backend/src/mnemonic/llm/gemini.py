@@ -5,27 +5,80 @@ from google.genai import types
 from pydantic import BaseModel
 
 from mnemonic.llm.base import Usage, parse_json_with_retry
-from mnemonic.schemas import Message
+from mnemonic.schemas import Message, ToolCall, ToolSpec
 
 
 def _split(messages: list[Message]) -> tuple[str, list[types.Content]]:
     """Gemini takes the system prompt separately and calls the assistant "model"."""
     system = "\n".join(m.content for m in messages if m.role == "system")
-    contents = [
-        types.Content(
-            role="model" if m.role == "assistant" else "user",
-            parts=[types.Part(text=m.content)],
+    contents: list[types.Content] = []
+    for m in messages:
+        if m.role == "system":
+            continue
+        if m.role == "tool":  # the tool result goes back as a function response of the user turn
+            part = types.Part.from_function_response(
+                name=m.tool_name or "", response={"result": m.content}
+            )
+            contents.append(types.Content(role="user", parts=[part]))
+            continue
+        parts = [types.Part(text=m.content)] if m.content else []
+        if m.tool_call:
+            parts.append(
+                types.Part(
+                    function_call=types.FunctionCall(name=m.tool_call.name, args=m.tool_call.args),
+                    thought_signature=m.tool_call.signature,
+                )
+            )
+        contents.append(
+            types.Content(role="model" if m.role == "assistant" else "user", parts=parts)
         )
-        for m in messages
-        if m.role != "system"
-    ]
     return system, contents
 
 
 class GeminiProvider:
+    supports_tools = True
+
     def __init__(self, api_key: str, model: str) -> None:
         self._client = genai.Client(api_key=api_key)
         self._model = model
+
+    async def stream_events(
+        self, messages: list[Message], tools: list[ToolSpec], usage: Usage | None = None
+    ) -> AsyncIterator[str | ToolCall]:
+        """Function calling: text tokens as they come, and a ToolCall when the model asks."""
+        system, contents = _split(messages)
+        declarations = [
+            types.FunctionDeclaration(
+                name=t.name, description=t.description, parameters=t.parameters
+            )
+            for t in tools
+        ]
+        config = types.GenerateContentConfig(
+            system_instruction=system or None,
+            tools=[types.Tool(function_declarations=declarations)] if declarations else None,
+            # We run the loop ourselves (budget, logging, limits per round).
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
+        response = await self._client.aio.models.generate_content_stream(
+            model=self._model, contents=contents, config=config
+        )
+        async for chunk in response:
+            meta = chunk.usage_metadata
+            if usage is not None and meta is not None:
+                usage.tokens_in = meta.prompt_token_count
+                usage.tokens_out = (meta.candidates_token_count or 0) + (
+                    meta.thoughts_token_count or 0
+                )
+            for candidate in chunk.candidates or []:
+                for part in (candidate.content.parts or []) if candidate.content else []:
+                    if part.function_call and part.function_call.name:
+                        yield ToolCall(
+                            name=part.function_call.name,
+                            args=dict(part.function_call.args or {}),
+                            signature=part.thought_signature,
+                        )
+                    elif part.text and not part.thought:
+                        yield part.text
 
     async def stream(
         self, messages: list[Message], usage: Usage | None = None

@@ -4,11 +4,31 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Message(BaseModel):
-    """Internal message passed to LLM providers. Only the server creates `system` ones."""
+class ToolSpec(BaseModel):
+    """A tool offered to the model: name, description and a JSON-schema of its arguments."""
 
-    role: Literal["system", "user", "assistant"]
-    content: str = Field(min_length=1)
+    name: str
+    description: str
+    parameters: dict
+
+
+class ToolCall(BaseModel):
+    """The model asks the server to run a tool. `signature` is opaque provider data that must
+    be sent back with the call (Gemini "thought signatures")."""
+
+    name: str
+    args: dict = Field(default_factory=dict)
+    signature: bytes | None = None
+
+
+class Message(BaseModel):
+    """Internal message passed to LLM providers. Only the server creates `system` and `tool`
+    ones (and assistant messages with a `tool_call`); the client cannot, see ClientMessage."""
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = ""
+    tool_call: ToolCall | None = None  # assistant: the call it made
+    tool_name: str | None = None  # tool: which tool produced `content`
 
 
 class ClientMessage(BaseModel):

@@ -7,7 +7,15 @@ from mnemonic.retrieval import Hit
 from mnemonic.schemas import ClientMessage, FlashcardSet, Message
 from mnemonic.store import Chunk, StoredMessage
 
-REFUSAL = "I don't know: the knowledge base has nothing relevant to this question."
+REFUSAL = (
+    "I don't know: the knowledge base has nothing relevant to this question. "
+    "Try a more specific question (include the topic name)."
+)
+
+TOOL_NOTE = """
+You also have a calculator tool. For any arithmetic (sums, products, percentages) over numbers
+from the context, call it instead of computing in your head, then answer using its result.
+"""
 
 SYSTEM_PROMPT = """\
 You are Mnemonic, a study assistant that answers questions about the documents in the context:
@@ -47,9 +55,12 @@ def format_context(hits: Sequence[Hit | Chunk]) -> str:
     )
 
 
-def build_messages(history: list[ClientMessage], hits: list[Hit]) -> list[Message]:
+def build_messages(
+    history: list[ClientMessage], hits: list[Hit], tools: bool = False
+) -> list[Message]:
     """The system message is built here, on the server, and never from client input."""
-    system = Message(role="system", content=SYSTEM_PROMPT.format(context=format_context(hits)))
+    content = SYSTEM_PROMPT.format(context=format_context(hits))
+    system = Message(role="system", content=content + (TOOL_NOTE if tools else ""))
     return [system, *(Message(role=m.role, content=m.content) for m in history)]
 
 

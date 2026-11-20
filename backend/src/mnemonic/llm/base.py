@@ -5,7 +5,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from mnemonic.schemas import Message
+from mnemonic.schemas import Message, ToolCall, ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,17 @@ class InvalidLLMOutput(Exception):
 class LLMProvider(Protocol):
     """Anything that can turn a conversation into a stream of text tokens, or into an object."""
 
+    # Providers that can call tools set this to True and implement stream_events; for the
+    # others the server never offers tools. Read it with getattr(provider, "supports_tools", False).
+    supports_tools: bool
+
     def stream(self, messages: list[Message], usage: Usage | None = None) -> AsyncIterator[str]: ...
+
+    def stream_events(
+        self, messages: list[Message], tools: list[ToolSpec], usage: Usage | None = None
+    ) -> AsyncIterator[str | ToolCall]:
+        """Like stream(), but may also yield a ToolCall (only if supports_tools)."""
+        ...
 
     async def generate_json[T: BaseModel](
         self, messages: list[Message], schema: type[T], usage: Usage | None = None

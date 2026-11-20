@@ -38,14 +38,17 @@ from mnemonic.schemas import (
     FlashcardRequest,
     FlashcardSet,
     Message,
+    ToolCall,
 )
 from mnemonic.security import (
+    BUSY_MESSAGE,
     get_global_limiter,
     limit_per_ip,
     require_api_key,
     spend_llm_budget,
 )
 from mnemonic.store import LLMCall, PgStore, Store, StoredDocument, TooManyDocuments
+from mnemonic.tools import CALCULATOR, run_tool
 
 # uvicorn configures only its own loggers; without this our INFO lines would be dropped.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -149,6 +152,11 @@ async def log_llm_call(
         logger.exception("could not write the LLM call log")
 
 
+# Max LLM calls for one question: tool round(s) + the final answer. The last one gets no tools,
+# so the loop always ends with text.
+MAX_TOOL_ROUNDS = 3
+
+
 async def event_stream(
     provider: LLMProvider,
     messages: list[Message],
@@ -156,55 +164,91 @@ async def event_stream(
     settings: Settings,
     store: Store,
     session_id: UUID,
+    global_limiter: SlidingWindowLimiter | None = None,
 ) -> AsyncIterator[str]:
+    """Stream the answer. With a tool-calling provider this is a loop: stream; if the model asks
+    for a tool, run it, append the result and stream again (max MAX_TOOL_ROUNDS rounds). Every
+    round is one LLM call: one slot of the global budget and one llm_calls row. Tool calls are
+    not saved in the messages table: the history keeps only the final text."""
     timeout = settings.llm_timeout_seconds
-    usage, retries = Usage(), 0
-
-    def count_retry() -> None:
-        nonlocal retries
-        retries += 1
-
-    # By the time a token fails, HTTP 200 is already sent — report errors as an event.
-    tokens = stream_with_retry(provider, messages, usage, on_retry=count_retry)
+    use_tools = getattr(provider, "supports_tools", False)
+    messages = list(messages)
     answer: list[str] = []
     error: str | None = None
-    started = time.perf_counter()
-    try:
-        while True:
-            # Idle timeout: applies to every wait, so a model that never starts
-            # (or stalls mid-answer) cannot hang the request forever.
-            async with asyncio.timeout(timeout):
-                try:
-                    token = await anext(tokens)
-                except StopAsyncIteration:
-                    break
-            answer.append(token)
-            yield sse(token)
-    except TimeoutError:
-        logger.warning("LLM provider sent nothing for %.1fs, giving up", timeout)
-        error = (
-            f"The model did not respond within {timeout:g} seconds. "
-            "It may be overloaded — please try again."
+
+    for round_no in range(MAX_TOOL_ROUNDS if use_tools else 1):
+        if round_no:  # round 0 was paid for in chat(), before the response started
+            try:
+                if global_limiter:
+                    spend_llm_budget(global_limiter)
+            except HTTPException:  # HTTP 200 is already sent: report it as an event
+                error = BUSY_MESSAGE
+                break
+        tools = ([CALCULATOR] if round_no < MAX_TOOL_ROUNDS - 1 else []) if use_tools else None
+        usage, retries = Usage(), 0
+
+        def count_retry() -> None:
+            nonlocal retries
+            retries += 1
+
+        # By the time a token fails, HTTP 200 is already sent: report errors as an event.
+        events = stream_with_retry(provider, messages, usage, on_retry=count_retry, tools=tools)
+        round_text: list[str] = []
+        call: ToolCall | None = None
+        round_error: str | None = None
+        started = time.perf_counter()
+        try:
+            while True:
+                # Idle timeout: applies to every wait, so a model that never starts
+                # (or stalls mid-answer) cannot hang the request forever.
+                async with asyncio.timeout(timeout):
+                    try:
+                        event = await anext(events)
+                    except StopAsyncIteration:
+                        break
+                if isinstance(event, ToolCall):
+                    call = call or event  # one call per round; extra parallel ones are ignored
+                    continue
+                round_text.append(event)
+                answer.append(event)
+                yield sse(event)
+        except TimeoutError:
+            logger.warning("LLM provider sent nothing for %.1fs, giving up", timeout)
+            round_error = (
+                f"The model did not respond within {timeout:g} seconds. "
+                "It may be overloaded — please try again."
+            )
+        except Exception:
+            logger.exception("LLM provider failed mid-stream")
+            round_error = "The model failed to answer. Please try again."
+        finally:
+            # Stop the provider's generator so its HTTP request is closed too.
+            await events.aclose()
+        # Not reached when the client disconnects (the generator is closed at a `yield`): such
+        # calls are not logged.
+        await log_llm_call(
+            store,
+            settings,
+            session_id,
+            messages,
+            "".join(round_text),
+            usage,
+            retries,
+            round((time.perf_counter() - started) * 1000),
+            ok=round_error is None,
         )
-    except Exception:
-        logger.exception("LLM provider failed mid-stream")
-        error = "The model failed to answer. Please try again."
-    finally:
-        # Stop the provider's generator so its HTTP request is closed too.
-        await tokens.aclose()
-    # Not reached when the client disconnects (the generator is closed at a `yield`): such
-    # calls are not logged.
-    await log_llm_call(
-        store,
-        settings,
-        session_id,
-        messages,
-        "".join(answer),
-        usage,
-        retries,
-        round((time.perf_counter() - started) * 1000),
-        ok=error is None,
-    )
+        if round_error:
+            error = round_error
+            break
+        if call is None or not tools:
+            break  # a final answer (a call without offered tools is ignored)
+        result = run_tool(call)
+        yield sse({"name": call.name, "args": call.args, "result": result}, event="tool")
+        messages += [
+            Message(role="assistant", content="".join(round_text), tool_call=call),
+            Message(role="tool", content=result, tool_name=call.name),
+        ]
+
     if error:
         yield sse(error, event="error")
         return
@@ -253,8 +297,11 @@ async def chat(
     else:
         # Retrieval used only the current question; the model also sees the recent turns.
         current = ClientMessage(role="user", content=request.message)
-        messages = build_messages([*history, current], hits)
-        body = event_stream(provider, messages, hits, settings, store, request.session_id)
+        tools = getattr(provider, "supports_tools", False)
+        messages = build_messages([*history, current], hits, tools=tools)
+        body = event_stream(
+            provider, messages, hits, settings, store, request.session_id, global_limiter
+        )
     return StreamingResponse(
         body,
         media_type="text/event-stream",
