@@ -1,5 +1,8 @@
 {
-  "app": { "name": "Mnemonic", "tagline": "Study with answers you can verify" },
+  "app": {
+    "name": "Mnemonic",
+    "tagline": "Study with answers you can verify"
+  },
   "nav": {
     "chat": "Chat",
     "documents": "Documents",
@@ -19,6 +22,7 @@
     "required": "Enter the access code",
     "tooLong": "That code is too long",
     "wrong": "This code was not accepted. Check it and try again.",
+    "unreachable": "Can't reach the server, so the code could not be checked. Check your connection and press Continue to retry.",
     "checking": "Checking…"
   },
   "chat": {
@@ -36,6 +40,8 @@
     "loadingHistory": "Loading history…",
     "historyFailed": "Couldn't load the chat history.",
     "retry": "Retry",
+    "sessions": "Chats",
+    "deleteSession": "Delete chat “{{title}}”",
     "newChat": "New chat",
     "you": "You",
     "assistant": "Mnemonic",
@@ -54,12 +60,52 @@
     "close": "Close"
   },
   "documents": {
+    "subtitle": "Upload your own notes. Answers in chat can then cite them.",
+    "drop": "Drag a file here, or",
+    "choose": "Choose a file",
+    "hint": "{{types}} · up to {{mb}} MB · at most {{max}} documents",
+    "uploading": "Uploading and indexing…",
+    "uploaded": "“{{name}}” is ready",
+    "deleted": "Document deleted",
+    "loading": "Loading documents…",
+    "loadFailed": "Couldn't load your documents.",
+    "chunks_one": "{{count}} passage",
+    "chunks_other": "{{count}} passages",
+    "delete": "Delete {{name}}",
+    "confirmTitle": "Delete this document?",
+    "confirmText": "“{{name}}” will be removed and chat answers will no longer cite it.",
+    "deleteConfirm": "Delete",
+    "errType": "This file type isn't supported. Use {{types}}.",
+    "errEmpty": "The file is empty.",
+    "errSize": "The file is larger than {{mb}} MB.",
+    "errLimit": "You can keep at most {{max}} documents. Delete one first.",
     "emptyTitle": "No documents yet",
-    "emptyText": "Upload your notes (.md, .txt, .pdf) and ask questions about them. Coming in the next milestone."
+    "emptyText": "Upload your notes (.md, .txt, .pdf) and ask questions about them in chat."
   },
   "flashcards": {
     "emptyTitle": "No flashcards yet",
-    "emptyText": "Turn any answer into flashcards to remember it. Coming in the next milestone."
+    "emptyText": "Ask a question in chat. When the answer finishes, press “Make flashcards” under it. Your decks will appear here.",
+    "subtitle": "Decks you made from answers. They are stored in this browser.",
+    "make": "Make flashcards",
+    "making": "Making flashcards…",
+    "open": "Open",
+    "created_one": "{{count}} flashcard saved",
+    "created_other": "{{count}} flashcards saved",
+    "cards_one": "{{count}} card",
+    "cards_other": "{{count}} cards",
+    "loadMore": "Load more ({{left}} left)",
+    "back": "All decks",
+    "review": "Review",
+    "deleteDeck": "Delete deck",
+    "confirmTitle": "Delete this deck?",
+    "confirmText": "The cards are stored only in this browser and cannot be restored.",
+    "exit": "Exit review",
+    "question": "Question",
+    "answer": "Answer",
+    "flipHint": "Click or press Space to reveal",
+    "prev": "Previous",
+    "next": "Next",
+    "progress": "Card {{current}} of {{total}}"
   },
   "settings": {
     "title": "Settings",
@@ -84,5 +130,11 @@
     "auth": "The access code was not accepted. Please enter it again.",
     "busy": "The service is busy right now. Try again in a minute.",
     "server": "The server had a problem. Please try again."
+  },
+  "common": {
+    "cancel": "Cancel"
+  },
+  "offline": {
+    "banner": "You're offline. Changes will work again when the connection returns."
   }
 }

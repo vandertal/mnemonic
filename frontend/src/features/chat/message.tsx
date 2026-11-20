@@ -5,7 +5,8 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { isRefusal, renumberCitations } from './citations'
+import { isRefusal, linkCitations, renumberCitations } from './citations'
+import { MakeFlashcardsButton } from '@/features/flashcards/make-flashcards'
 import { Markdown } from './markdown'
 import { SourceCard } from './source-card'
 import type { ChatMessage } from './use-chat'
@@ -42,12 +43,18 @@ function UserMessage({ message }: { message: ChatMessage }) {
   )
 }
 
-function AssistantMessage({ message }: { message: ChatMessage }) {
+function AssistantMessage({ message, sessionId, question }: MessageProps) {
   const { t } = useTranslation()
   const { content, status, sources, tools } = message
   const streaming = status === 'streaming'
   const refusal = !streaming && isRefusal(content)
   const text = streaming ? content : renumberCitations(content, sources)
+  const linked = streaming ? content : linkCitations(content, sources)
+  const sourceId = (n: number) => `source-${message.key}-${n}`
+  const citations = {
+    idFor: sourceId,
+    titleFor: (n: number) => (sources[n - 1]?.heading || sources[n - 1]?.file_path) ?? '',
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -78,7 +85,9 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           <p className="text-sm text-muted-foreground">{content}</p>
         </div>
       ) : (
-        content && <Markdown className={cn(streaming && 'streaming-caret')}>{text}</Markdown>
+        content && <Markdown className={cn(streaming && 'streaming-caret')} citations={citations}>
+            {linked}
+          </Markdown>
       )}
 
       {status === 'error' && (
@@ -94,21 +103,34 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           <h3 className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">{t('chat.sources')}</h3>
           <div className="grid gap-2 sm:grid-cols-2">
             {sources.map((s, i) => (
-              <SourceCard key={s.id} source={s} index={i + 1} />
+              <SourceCard key={s.id} source={s} index={i + 1} domId={sourceId(i + 1)} />
             ))}
           </div>
         </section>
       )}
 
       {!streaming && content && !refusal && (
-        <div className="-ml-2 flex">
+        <div className="-ml-2 flex items-center gap-1">
           <CopyButton text={text} />
+          {message.messageId && sources.length > 0 && (
+            <MakeFlashcardsButton sessionId={sessionId} messageId={message.messageId} question={question} />
+          )}
         </div>
       )}
     </div>
   )
 }
 
-export function MessageView({ message }: { message: ChatMessage }) {
-  return message.role === 'user' ? <UserMessage message={message} /> : <AssistantMessage message={message} />
+interface MessageProps {
+  message: ChatMessage
+  sessionId: string
+  question: string // the user question this answer belongs to
+}
+
+export function MessageView(props: MessageProps) {
+  return props.message.role === 'user' ? (
+    <UserMessage message={props.message} />
+  ) : (
+    <AssistantMessage {...props} />
+  )
 }
