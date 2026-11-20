@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024
     max_pdf_pages: int = 50
     max_documents_per_owner: int = 5
+    # Browser origins allowed to call the API (comma-separated). The default is the Vite dev server.
+    cors_origins: str = "http://localhost:5173"
 
 
 @lru_cache

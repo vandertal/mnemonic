@@ -12,6 +12,7 @@ from uuid import UUID
 import numpy as np
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi import Path as PathParam
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from mnemonic.config import Settings, get_settings
@@ -70,6 +71,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Mnemonic", lifespan=lifespan)
+
+# The SPA lives on another origin, so the browser sends a preflight (OPTIONS) before any request
+# with X-API-Key / JSON. Only the listed origins pass; no cookies are used, so no credentials.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["X-API-Key", "Content-Type"],
+)
 
 
 @lru_cache
