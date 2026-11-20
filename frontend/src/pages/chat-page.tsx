@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/card'
 import { Composer } from '@/features/chat/composer'
 import { MessageView } from '@/features/chat/message'
 import { useChat } from '@/features/chat/use-chat'
+import { useSessions } from '@/lib/sessions'
 
 function EmptyState({ onPick }: { onPick: (q: string) => void }) {
   const { t } = useTranslation()
@@ -35,9 +36,16 @@ function EmptyState({ onPick }: { onPick: (q: string) => void }) {
   )
 }
 
+/** Remounted per session (key= below): switching chats drops all local state and aborts a running stream. */
 export default function ChatPage() {
+  const { activeId } = useSessions()
+  return <ChatView key={activeId} sessionId={activeId} />
+}
+
+function ChatView({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation()
-  const { messages, history, busy, send, stop, reloadHistory } = useChat()
+  const { touch } = useSessions()
+  const { messages, history, busy, send, stop, reloadHistory } = useChat(sessionId, (q) => touch(sessionId, q))
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true) // follow the stream only while the reader is at the bottom
 
@@ -76,7 +84,14 @@ export default function ChatPage() {
           ) : messages.length === 0 ? (
             <EmptyState onPick={onSend} />
           ) : (
-            messages.map((m) => <MessageView key={m.key} message={m} />)
+            messages.map((m, i) => (
+              <MessageView
+                key={m.key}
+                message={m}
+                sessionId={sessionId}
+                question={messages.slice(0, i).findLast((p) => p.role === 'user')?.content ?? ''}
+              />
+            ))
           )}
         </div>
       </div>

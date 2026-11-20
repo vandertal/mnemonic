@@ -1,11 +1,24 @@
-import { BookOpen, FileText, Layers, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
+import {
+  BookOpen,
+  FileText,
+  Layers,
+  Menu,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { OfflineBanner } from '@/components/offline-banner'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { useSessions } from '@/lib/sessions'
 import { readStored, writeStored } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
@@ -28,12 +41,69 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
   )
 }
 
+function SessionList({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { sessions, activeId, select, remove } = useSessions()
+  return (
+    <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2" aria-label={t('chat.sessions')}>
+      {sessions.map((s) => (
+        <li key={s.id} className="group relative">
+          <button
+            type="button"
+            onClick={() => {
+              select(s.id)
+              navigate('/chat')
+              onNavigate?.()
+            }}
+            aria-current={s.id === activeId ? 'true' : undefined}
+            className={cn(
+              'flex h-8 w-full cursor-pointer items-center rounded-md pr-8 pl-3 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+              s.id === activeId && 'bg-accent-soft font-medium text-foreground',
+            )}
+          >
+            <span className="truncate">{s.title || t('chat.newChat')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => remove(s.id)}
+            aria-label={t('chat.deleteSession', { title: s.title || t('chat.newChat') })}
+            className="absolute top-1 right-1 grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-background hover:text-destructive focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function SidebarBody({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { newChat } = useSessions()
+  const startChat = () => {
+    newChat()
+    navigate('/chat')
+    onNavigate?.()
+  }
   return (
     <>
       <Brand collapsed={collapsed} />
-      <nav className="flex flex-1 flex-col gap-1 px-2 py-2">
+      <div className={cn('px-2', collapsed && 'flex justify-center')}>
+        <Button
+          variant="outline"
+          size={collapsed ? 'icon' : 'default'}
+          className={cn(!collapsed && 'w-full justify-start')}
+          onClick={startChat}
+          title={collapsed ? t('chat.newChat') : undefined}
+          aria-label={t('chat.newChat')}
+        >
+          <Plus className="size-4" />
+          {!collapsed && t('chat.newChat')}
+        </Button>
+      </div>
+      <nav className="flex flex-col gap-1 px-2 py-2">
         {NAV.map(({ to, icon: Icon, key }) => (
           <NavLink
             key={to}
@@ -53,6 +123,7 @@ function SidebarBody({ collapsed, onNavigate }: { collapsed?: boolean; onNavigat
           </NavLink>
         ))}
       </nav>
+      {collapsed ? <div className="flex-1" /> : <SessionList onNavigate={onNavigate} />}
       {!collapsed && (
         <div className="flex items-center justify-between gap-2 border-t p-3">
           <LanguageSwitcher />
@@ -112,6 +183,7 @@ export function AppShell() {
           </Button>
           <span className="font-semibold tracking-tight">{t('app.name')}</span>
         </header>
+        <OfflineBanner />
         <main className="flex min-h-0 flex-1 flex-col">
           <Outlet />
         </main>

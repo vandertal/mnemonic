@@ -33,6 +33,24 @@ export function removeStored(key: keyof typeof KEYS): void {
   }
 }
 
+/** JSON under a free-form key (e.g. per-owner decks). Corrupt or missing data gives the fallback. */
+export function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(`mnemonic.${key}`)
+    return raw === null ? fallback : (JSON.parse(raw) as T)
+  } catch {
+    return fallback
+  }
+}
+
+export function writeJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(`mnemonic.${key}`, JSON.stringify(value))
+  } catch {
+    /* quota or blocked storage: the data just will not persist */
+  }
+}
+
 /** A random UUID kept in localStorage. NOT authentication: it only separates one browser's data from another's. */
 export function getOrCreateId(key: 'sessionId' | 'ownerId'): string {
   const existing = readStored(key)

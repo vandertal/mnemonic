@@ -6,6 +6,8 @@ import { describeError, toastError } from '@/lib/errors'
 
 export interface ChatMessage {
   key: string
+  /** Server id of a saved assistant answer; needed to make flashcards from it. */
+  messageId?: number
   role: 'user' | 'assistant'
   content: string
   sources: Source[]
@@ -16,7 +18,8 @@ export interface ChatMessage {
 
 type History = 'loading' | 'ready' | 'error'
 
-export function useChat() {
+/** One chat session. The page remounts it per session (key=), so no state leaks between chats. */
+export function useChat(sessionId: string, onAsk: (question: string) => void) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [history, setHistory] = useState<History>('loading')
   const [busy, setBusy] = useState(false)
@@ -24,11 +27,12 @@ export function useChat() {
 
   // The state starts as 'loading'; callers that retry set it themselves.
   const loadHistory = useCallback((signal?: AbortSignal) => {
-    fetchHistory(signal).then(
+    fetchHistory(sessionId, signal).then(
       (stored) => {
         setMessages(
           stored.map((m) => ({
             key: `db-${m.id}`,
+            messageId: m.role === 'assistant' ? m.id : undefined,
             role: m.role,
             content: m.content,
             sources: m.sources ?? [],
@@ -44,7 +48,7 @@ export function useChat() {
         toastError(e)
       },
     )
-  }, [])
+  }, [sessionId])
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -61,6 +65,7 @@ export function useChat() {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setBusy(true)
+    onAsk(question)
 
     const id = crypto.randomUUID()
     const assistantKey = `a-${id}`
@@ -74,11 +79,11 @@ export function useChat() {
     ])
 
     try {
-      for await (const ev of streamChat(question, ctrl.signal)) {
+      for await (const ev of streamChat(sessionId, question, ctrl.signal)) {
         if (ev.type === 'token') patch((m) => ({ ...m, content: m.content + ev.text }))
         else if (ev.type === 'sources') patch((m) => ({ ...m, sources: ev.sources }))
         else if (ev.type === 'tool') patch((m) => ({ ...m, tools: [...m.tools, ev.tool] }))
-        else if (ev.type === 'done') patch((m) => ({ ...m, status: 'done' }))
+        else if (ev.type === 'done') patch((m) => ({ ...m, status: 'done', messageId: ev.messageId ?? undefined }))
         else patch((m) => ({ ...m, status: 'error', error: ev.message }))
       }
       patch((m) => (m.status === 'streaming' ? { ...m, status: 'done' } : m))
@@ -92,7 +97,7 @@ export function useChat() {
       abortRef.current = null
       setBusy(false)
     }
-  }, [])
+  }, [sessionId, onAsk])
 
   const reloadHistory = useCallback(() => {
     setHistory('loading')
