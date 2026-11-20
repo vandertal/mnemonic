@@ -1,0 +1,88 @@
+{
+  "app": { "name": "Mnemonic", "tagline": "Study with answers you can verify" },
+  "nav": {
+    "chat": "Chat",
+    "documents": "Documents",
+    "flashcards": "Flashcards",
+    "settings": "Settings",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar"
+  },
+  "access": {
+    "title": "Enter your access code",
+    "description": "Mnemonic is in a closed preview. Paste the access code you were given.",
+    "label": "Access code",
+    "placeholder": "Paste your code",
+    "submit": "Continue",
+    "required": "Enter the access code",
+    "tooLong": "That code is too long",
+    "wrong": "This code was not accepted. Check it and try again.",
+    "checking": "Checking…"
+  },
+  "chat": {
+    "title": "What do you want to learn?",
+    "subtitle": "Ask about the knowledge base or your own documents. Every answer cites its sources, or says it doesn't know.",
+    "placeholder": "Ask a question…",
+    "send": "Send",
+    "stop": "Stop",
+    "stopped": "Stopped",
+    "copy": "Copy answer",
+    "copied": "Copied",
+    "sources": "Sources",
+    "dontKnow": "Not in the knowledge base",
+    "tool": "Used {{name}}",
+    "loadingHistory": "Loading history…",
+    "historyFailed": "Couldn't load the chat history.",
+    "retry": "Retry",
+    "newChat": "New chat",
+    "you": "You",
+    "assistant": "Mnemonic",
+    "suggestions": [
+      "How do I declare a path parameter in FastAPI?",
+      "What is dependency injection in FastAPI?",
+      "How do I validate a request body with Pydantic?",
+      "How much is 15% of 2480?"
+    ]
+  },
+  "source": {
+    "open": "Open source {{n}}",
+    "loading": "Loading the passage…",
+    "failed": "Couldn't load this passage.",
+    "match": "{{percent}}% match",
+    "close": "Close"
+  },
+  "documents": {
+    "emptyTitle": "No documents yet",
+    "emptyText": "Upload your notes (.md, .txt, .pdf) and ask questions about them. Coming in the next milestone."
+  },
+  "flashcards": {
+    "emptyTitle": "No flashcards yet",
+    "emptyText": "Turn any answer into flashcards to remember it. Coming in the next milestone."
+  },
+  "settings": {
+    "title": "Settings",
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "language": "Language",
+    "access": "Access",
+    "accessText": "Your access code is stored in this browser. Signing out removes it.",
+    "signOut": "Sign out"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "text": "The page you are looking for doesn't exist.",
+    "home": "Back to chat"
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "network": "Can't reach the server. Check your connection and try again.",
+    "auth": "The access code was not accepted. Please enter it again.",
+    "busy": "The service is busy right now. Try again in a minute.",
+    "server": "The server had a problem. Please try again."
+  }
+}
