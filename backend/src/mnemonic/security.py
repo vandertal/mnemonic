@@ -36,6 +36,24 @@ def get_global_limiter() -> SlidingWindowLimiter:
     return SlidingWindowLimiter(get_settings().global_rpm)
 
 
+@lru_cache
+def get_auth_limiter() -> SlidingWindowLimiter:
+    return SlidingWindowLimiter(get_settings().auth_rate_limit_per_minute)
+
+
+def limit_auth_per_ip(
+    request: Request, limiter: Annotated[SlidingWindowLimiter, Depends(get_auth_limiter)]
+) -> None:
+    """Stricter per-IP limit for /auth/*: login guessing and argon2 are both worth throttling."""
+    wait = limiter.acquire(client_ip(request))
+    if wait is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many attempts from your address. Please slow down.",
+            headers=retry_after_header(wait),
+        )
+
+
 def limit_per_ip(
     request: Request, limiter: Annotated[SlidingWindowLimiter, Depends(get_ip_limiter)]
 ) -> None:

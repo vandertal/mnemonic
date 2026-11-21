@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     # Shared secret the client must send in the X-API-Key header. The app refuses to start
     # without it, so a deploy can never be accidentally open to everyone.
     app_api_key: str = ""
+    # Secret that signs the access tokens (HS256). Required, >= 32 chars; whoever has it can
+    # forge a login. Generate: uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
+    jwt_secret: str = ""
+    jwt_expire_minutes: int = 1440
+    # If set, /auth/register needs this code (keeps strangers off the free LLM budget).
+    registration_code: str = ""
+    # Stricter per-IP limit for /auth/* (hashing is expensive, passwords can be guessed).
+    auth_rate_limit_per_minute: int = 5
     # Per-IP limit (requests per minute) and the service-wide LLM budget (LLM calls per minute).
     # The free Gemini tier allows only a few calls per minute for the whole project.
     rate_limit_per_minute: int = 10

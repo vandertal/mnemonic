@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ToolSpec(BaseModel):
@@ -70,3 +71,23 @@ class FlashcardRequest(BaseModel):
     session_id: UUID
     message_id: int = Field(ge=1)  # id of an assistant message in this session
     owner_id: UUID | None = None  # to read the uploaded chunks the answer cited
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    registration_code: str | None = Field(
+        default=None, description="Required only if the server sets REGISTRATION_CODE."
+    )
+
+
+class UserOut(BaseModel):
+    id: UUID
+    email: str
+    created_at: datetime
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(description="Token lifetime in seconds.")

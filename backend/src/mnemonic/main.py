@@ -33,6 +33,7 @@ from mnemonic.rag import (
     valid_citations,
 )
 from mnemonic.retrieval import Hit, PgRetriever, Retriever
+from mnemonic.routes_auth import router as auth_router
 from mnemonic.schemas import (
     ChatRequest,
     ClientMessage,
@@ -48,13 +49,14 @@ from mnemonic.security import (
     require_api_key,
     spend_llm_budget,
 )
-from mnemonic.store import LLMCall, PgStore, Store, StoredDocument, TooManyDocuments
+from mnemonic.store import LLMCall, Store, StoredDocument, TooManyDocuments, get_store
 from mnemonic.tools import CALCULATOR, run_tool
 
 # uvicorn configures only its own loggers; without this our INFO lines would be dropped.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+MIN_JWT_SECRET_LENGTH = 32
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -64,9 +66,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = app.dependency_overrides.get(get_settings, get_settings)()
     if not settings.app_api_key:
         raise RuntimeError("APP_API_KEY is not set (see backend/.env.example)")
+    if len(settings.jwt_secret) < MIN_JWT_SECRET_LENGTH:
+        raise RuntimeError(
+            f"JWT_SECRET is not set or shorter than {MIN_JWT_SECRET_LENGTH} characters "
+            "(see backend/.env.example)"
+        )
     logger.info("LLM provider: %s", describe_provider(settings))
-    store = app.dependency_overrides.get(get_store, get_store)()
-    await asyncio.to_thread(store.init_schema)
     yield
 
 
@@ -77,14 +82,11 @@ app = FastAPI(title="Mnemonic", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["X-API-Key", "Content-Type"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["X-API-Key", "Authorization", "Content-Type"],
 )
 
-
-@lru_cache
-def get_store() -> Store:
-    return PgStore(get_settings().database_url)
+app.include_router(auth_router)
 
 
 @lru_cache
