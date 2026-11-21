@@ -10,9 +10,10 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { PageFallback } from '@/components/page-fallback'
 import { OfflineBanner } from '@/components/offline-banner'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -185,7 +186,9 @@ export function AppShell() {
         </header>
         <OfflineBanner />
         <main className="flex min-h-0 flex-1 flex-col">
-          <Outlet />
+          <Suspense fallback={<PageFallback inShell />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

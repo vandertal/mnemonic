@@ -1,63 +1,15 @@
-import ReactMarkdown from 'react-markdown'
+import { lazy, Suspense } from 'react'
 import { cn } from '@/lib/utils'
-import { CITE_PREFIX } from './citations'
+import type { CitationLinks } from './markdown-impl'
 
-export interface CitationLinks {
-  /** DOM id of the source card for citation number n (1-based). */
-  idFor: (n: number) => string
-  titleFor: (n: number) => string
-}
+// react-markdown and its parser are the heaviest dependency; they load only when a message is shown.
+const MarkdownImpl = lazy(() => import('./markdown-impl'))
 
-function scrollToSource(id: string) {
-  const el = document.getElementById(id)
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  el.focus({ preventScroll: true })
-  el.setAttribute('data-flash', '')
-  window.setTimeout(() => el.removeAttribute('data-flash'), 1600)
-}
-
-/** Model output is untrusted: react-markdown renders it as React elements and ignores raw HTML. */
-export function Markdown({
-  children,
-  className,
-  citations,
-}: {
-  children: string
-  className?: string
-  citations?: CitationLinks
-}) {
+export function Markdown(props: { children: string; className?: string; citations?: CitationLinks }) {
   return (
-    <div className={cn('markdown', className)}>
-      <ReactMarkdown
-        components={{
-          a: ({ node: _node, href, children: label, ...props }) => {
-            if (citations && href?.startsWith(CITE_PREFIX)) {
-              const n = Number(href.slice(CITE_PREFIX.length))
-              return (
-                <a
-                  href={`#${citations.idFor(n)}`}
-                  title={citations.titleFor(n)}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    scrollToSource(citations.idFor(n))
-                  }}
-                  className="mx-0.5 inline-grid min-w-5 place-items-center rounded-md bg-accent-soft px-1 align-baseline text-xs font-semibold text-accent no-underline hover:bg-accent hover:text-accent-foreground"
-                >
-                  {label}
-                </a>
-              )
-            }
-            return (
-              <a href={href} {...props} target="_blank" rel="noopener noreferrer">
-                {label}
-              </a>
-            )
-          },
-        }}
-      >
-        {children}
-      </ReactMarkdown>
-    </div>
+    // The fallback is the raw text in the same box, so the answer does not jump when the chunk arrives.
+    <Suspense fallback={<div className={cn('markdown whitespace-pre-wrap', props.className)}>{props.children}</div>}>
+      <MarkdownImpl {...props} />
+    </Suspense>
   )
 }
