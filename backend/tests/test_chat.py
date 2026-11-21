@@ -256,7 +256,3 @@ def test_history_endpoint_returns_messages_in_order(client, store):
 def test_history_of_unknown_session_is_empty_and_ids_are_validated(client):
     assert client.get(f"/sessions/{uuid.uuid4()}/messages").json() == []
     assert client.get("/sessions/nope/messages").status_code == 422
-
-
-def test_schema_is_created_at_startup(client, store):
-    assert store.schema_initialized

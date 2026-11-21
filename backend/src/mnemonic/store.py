@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Literal, Protocol
 from uuid import UUID
 
@@ -12,39 +13,8 @@ import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
-from mnemonic.ingest import db as chunks_db
+from mnemonic.config import get_settings
 from mnemonic.ingest.chunker import Chunk as NewChunk
-
-# Created at app startup; every statement is idempotent. No migrations yet (Alembic: lab 21).
-# The chunks / documents tables are created by `chunks_db.SCHEMA`, which init_schema runs first.
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS sessions (
-    id         uuid PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         bigserial PRIMARY KEY,
-    session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    role       text NOT NULL CHECK (role IN ('user', 'assistant')),
-    content    text NOT NULL,
-    sources    jsonb,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS messages_session_idx ON messages (session_id, id);
-
-CREATE TABLE IF NOT EXISTS llm_calls (
-    id         bigserial PRIMARY KEY,
-    session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    model      text NOT NULL,
-    tokens_in  integer NOT NULL,
-    tokens_out integer NOT NULL,
-    cost_usd   numeric(12, 8) NOT NULL,
-    latency_ms integer NOT NULL,
-    status     text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-"""
 
 
 @dataclass(frozen=True)
@@ -87,6 +57,17 @@ class StoredDocument:
     chunks: int
 
 
+@dataclass(frozen=True)
+class User:
+    id: UUID
+    email: str
+    created_at: datetime
+
+
+class EmailTaken(Exception):
+    """An account with this email already exists."""
+
+
 class TooManyDocuments(Exception):
     """The owner already has the maximum number of documents."""
 
@@ -94,7 +75,15 @@ class TooManyDocuments(Exception):
 class Store(Protocol):
     """Blocking API: call it from a worker thread (asyncio.to_thread)."""
 
-    def init_schema(self) -> None: ...
+    def create_user(self, email: str, password_hash: str) -> User:
+        """Insert an account; raises EmailTaken if the (lower-cased) email exists."""
+        ...
+
+    def get_user_by_email(self, email: str) -> tuple[User, str] | None:
+        """The user and their password hash, or None."""
+        ...
+
+    def get_user(self, user_id: UUID) -> User | None: ...
 
     def add_message(
         self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
@@ -142,10 +131,34 @@ class PgStore:
         # callers commits and closes it.
         return psycopg.connect(self._url)
 
-    def init_schema(self) -> None:
+    def create_user(self, email: str, password_hash: str) -> User:
+        # No "check, then insert": two parallel requests could both pass the check. The UNIQUE
+        # constraint is the only race-free referee, so we insert and translate its error.
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "INSERT INTO users (email, password_hash) VALUES (%s, %s) "
+                    "RETURNING id, email, created_at",
+                    (email, password_hash),
+                ).fetchone()
+        except psycopg.errors.UniqueViolation:
+            raise EmailTaken from None
+        return User(*row)
+
+    def get_user_by_email(self, email: str) -> tuple[User, str] | None:
         with self._connect() as conn:
-            conn.execute(chunks_db.SCHEMA)  # chunks + documents (+ the M7a columns)
-            conn.execute(SCHEMA)
+            row = conn.execute(
+                "SELECT id, email, created_at, password_hash FROM users WHERE email = %s",
+                (email,),
+            ).fetchone()
+        return None if row is None else (User(*row[:3]), row[3])
+
+    def get_user(self, user_id: UUID) -> User | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, email, created_at FROM users WHERE id = %s", (user_id,)
+            ).fetchone()
+        return None if row is None else User(*row)
 
     def add_message(
         self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
@@ -266,3 +279,8 @@ class PgStore:
                     call.status,
                 ),
             )
+
+
+@lru_cache
+def get_store() -> Store:
+    return PgStore(get_settings().database_url)

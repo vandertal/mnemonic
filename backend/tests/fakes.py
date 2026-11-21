@@ -1,10 +1,18 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from mnemonic.retrieval import Hit
 from mnemonic.schemas import Message
-from mnemonic.store import Chunk, LLMCall, StoredDocument, StoredMessage, TooManyDocuments
+from mnemonic.store import (
+    Chunk,
+    EmailTaken,
+    LLMCall,
+    StoredDocument,
+    StoredMessage,
+    TooManyDocuments,
+    User,
+)
 
 KEY = "test-key"
 AUTH = {"X-API-Key": KEY}
@@ -52,17 +60,28 @@ class MemoryStore:
     def __init__(self) -> None:
         self.messages: dict[UUID, list[StoredMessage]] = {}
         self.llm_calls: list[LLMCall] = []
-        self.schema_initialized = False
         self.chunks: dict[int, Chunk] = {}
         self.chunk_owner: dict[int, UUID | None] = {}  # absent / None = shared
         self.documents: dict[int, tuple[UUID, StoredDocument]] = {}
         self.chunk_document: dict[int, int] = {}
+        self.users: dict[UUID, tuple[User, str]] = {}
         self._next_id = 0
         self._next_chunk_id = 1000
         self._next_doc_id = 0
 
-    def init_schema(self) -> None:
-        self.schema_initialized = True
+    def create_user(self, email: str, password_hash: str) -> User:
+        if any(u.email == email for u, _ in self.users.values()):
+            raise EmailTaken
+        user = User(uuid4(), email, datetime.now(UTC))
+        self.users[user.id] = (user, password_hash)
+        return user
+
+    def get_user_by_email(self, email: str) -> tuple[User, str] | None:
+        return next(((u, h) for u, h in self.users.values() if u.email == email), None)
+
+    def get_user(self, user_id: UUID) -> User | None:
+        entry = self.users.get(user_id)
+        return entry[0] if entry else None
 
     def add_message(
         self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
