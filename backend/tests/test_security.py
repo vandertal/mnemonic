@@ -1,5 +1,7 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,7 +11,8 @@ from mnemonic.main import app, get_provider, get_retriever, get_store
 from mnemonic.rag import REFUSAL
 from mnemonic.security import BUSY_MESSAGE, get_global_limiter, get_ip_limiter
 
-from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, RecordingProvider, make_hit
+from .conftest import TEST_JWT_SECRET
+from .fakes import FakeRetriever, MemoryStore, RecordingProvider, login, make_hit
 
 SESSION = uuid.UUID("22222222-2222-2222-2222-222222222222")
 BODY = {"session_id": str(SESSION), "message": "How do I use Query?"}
@@ -26,12 +29,14 @@ class FakeClock:
 def make_client(hits=None, **env):
     """TestClient with a fake retriever/provider/store. Returns (client, provider, store)."""
     provider, store = RecordingProvider("ok"), MemoryStore()
-    settings = Settings(_env_file=None, app_api_key=KEY, similarity_threshold=0.5, **env)
+    settings = Settings(_env_file=None, similarity_threshold=0.5, **env)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_retriever] = lambda: FakeRetriever(hits or [make_hit(1)])
     app.dependency_overrides[get_provider] = lambda: provider
     app.dependency_overrides[get_store] = lambda: store
-    return TestClient(app), provider, store
+    client = TestClient(app)
+    client.bearer = login(store, sessions=[SESSION])  # Alice's token; she owns SESSION
+    return client, provider, store
 
 
 def use_limiter(dependency, limit: int) -> SlidingWindowLimiter:
@@ -41,11 +46,20 @@ def use_limiter(dependency, limit: int) -> SlidingWindowLimiter:
     return limiter
 
 
-# --- API key -----------------------------------------------------------------------------
+# --- Bearer token ------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "wrong"}, {"X-API-Key": ""}])
-def test_chat_without_valid_key_is_401(headers):
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"X-API-Key": "anything"},  # the old scheme opens nothing
+        {"Authorization": ""},
+        {"Authorization": "Bearer nope"},
+        {"Authorization": "Basic YTpi"},
+    ],
+)
+def test_chat_without_valid_token_is_401(headers):
     client, provider, store = make_client()
     response = client.post("/chat", json=BODY, headers=headers)
 
@@ -53,17 +67,30 @@ def test_chat_without_valid_key_is_401(headers):
     assert provider.calls == [] and store.messages == {}
 
 
-def test_history_without_valid_key_is_401():
+def test_expired_and_foreign_tokens_are_401():
+    client, _, store = make_client()
+    user = store.get_user_by_email("alice@example.com")[0]
+    claims = {"sub": str(user.id), "exp": datetime.now(UTC) - timedelta(minutes=1)}
+    expired = jwt.encode(claims, TEST_JWT_SECRET, algorithm="HS256")
+    forged = jwt.encode(
+        {**claims, "exp": datetime.now(UTC) + timedelta(hours=1)}, "x" * 40, "HS256"
+    )
+    for token in (expired, forged):
+        response = client.post("/chat", json=BODY, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+
+
+def test_history_without_valid_token_is_401():
     client, _, _ = make_client()
     url = f"/sessions/{SESSION}/messages"
     assert client.get(url).status_code == 401
-    assert client.get(url, headers={"X-API-Key": "wrong"}).status_code == 401
-    assert client.get(url, headers=AUTH).status_code == 200
+    assert client.get(url, headers={"Authorization": "Bearer nope"}).status_code == 401
+    assert client.get(url, headers=client.bearer).status_code == 200
 
 
-def test_valid_key_is_accepted_and_index_needs_no_key():
+def test_valid_token_is_accepted_and_index_needs_none():
     client, _, _ = make_client()
-    assert client.post("/chat", json=BODY, headers=AUTH).status_code == 200
+    assert client.post("/chat", json=BODY, headers=client.bearer).status_code == 200
     assert client.get("/").status_code == 200
 
 
@@ -72,19 +99,7 @@ def test_unauthenticated_request_does_not_consume_the_ip_limit():
     use_limiter(get_ip_limiter, 1)
     for _ in range(3):
         assert client.post("/chat", json=BODY).status_code == 401
-    assert client.post("/chat", json=BODY, headers=AUTH).status_code == 200
-
-
-def test_app_refuses_to_start_without_api_key():
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, app_api_key="")
-    with pytest.raises(RuntimeError, match="APP_API_KEY"), TestClient(app):
-        pass
-
-
-def test_empty_configured_key_never_matches_an_empty_header():
-    client, _, _ = make_client()
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, app_api_key="")
-    assert client.post("/chat", json=BODY, headers={"X-API-Key": ""}).status_code == 401
+    assert client.post("/chat", json=BODY, headers=client.bearer).status_code == 200
 
 
 # --- per-IP limit ------------------------------------------------------------------------
@@ -93,7 +108,7 @@ def test_empty_configured_key_never_matches_an_empty_header():
 def test_per_ip_limit_returns_429_with_retry_after():
     client, _, _ = make_client()
     use_limiter(get_ip_limiter, 2)
-    codes = [client.post("/chat", json=BODY, headers=AUTH) for _ in range(3)]
+    codes = [client.post("/chat", json=BODY, headers=client.bearer) for _ in range(3)]
 
     assert [r.status_code for r in codes] == [200, 200, 429]
     assert int(codes[2].headers["Retry-After"]) >= 1
@@ -104,7 +119,9 @@ def test_per_ip_limit_is_per_first_forwarded_address():
     use_limiter(get_ip_limiter, 1)
 
     def post(forwarded):
-        return client.post("/chat", json=BODY, headers=AUTH | {"X-Forwarded-For": forwarded})
+        return client.post(
+            "/chat", json=BODY, headers=client.bearer | {"X-Forwarded-For": forwarded}
+        )
 
     assert post("1.1.1.1, 10.0.0.1").status_code == 200
     assert post("1.1.1.1, 10.0.0.2").status_code == 429  # same first element: same client
@@ -117,8 +134,8 @@ def test_per_ip_limit_is_per_first_forwarded_address():
 def test_global_limit_returns_429_and_the_llm_is_not_called():
     client, provider, store = make_client()
     use_limiter(get_global_limiter, 1)
-    first = client.post("/chat", json=BODY, headers=AUTH)
-    second = client.post("/chat", json=BODY, headers=AUTH)
+    first = client.post("/chat", json=BODY, headers=client.bearer)
+    second = client.post("/chat", json=BODY, headers=client.bearer)
 
     assert first.status_code == 200 and second.status_code == 429
     assert second.json()["detail"] == BUSY_MESSAGE
@@ -134,7 +151,7 @@ def test_i_dont_know_does_not_spend_the_global_budget():
     app.dependency_overrides[get_global_limiter] = lambda: limiter
 
     for _ in range(3):
-        response = client.post("/chat", json=BODY, headers=AUTH)
+        response = client.post("/chat", json=BODY, headers=client.bearer)
         assert response.status_code == 200 and REFUSAL in response.text
     assert provider.calls == []
     assert limiter.acquire("global") is None  # the single slot is still free

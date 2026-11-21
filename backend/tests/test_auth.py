@@ -9,14 +9,14 @@ from mnemonic.limits import SlidingWindowLimiter
 from mnemonic.main import app, get_store
 from mnemonic.security import get_auth_limiter
 from tests.conftest import TEST_JWT_SECRET
-from tests.fakes import KEY, MemoryStore
+from tests.fakes import MemoryStore
 
 EMAIL = "alice@example.com"
 PASSWORD = "correct horse battery"
 
 
 def settings(**kwargs) -> Settings:
-    return Settings(_env_file=None, app_api_key=KEY, **kwargs)
+    return Settings(_env_file=None, **kwargs)
 
 
 @pytest.fixture

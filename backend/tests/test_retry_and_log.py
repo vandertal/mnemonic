@@ -12,7 +12,7 @@ from mnemonic.llm.retry import stream_with_retry
 from mnemonic.main import app, get_provider, get_retriever, get_store
 from mnemonic.schemas import Message
 
-from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, make_hit
+from .fakes import FakeRetriever, MemoryStore, login, make_hit
 from .test_chat import parse_events
 
 SESSION = uuid.UUID("33333333-3333-3333-3333-333333333333")
@@ -119,12 +119,12 @@ async def test_other_errors_are_not_retried(sleeps, error):
 
 def make_client(provider, **env):
     store = MemoryStore()
-    settings = Settings(_env_file=None, app_api_key=KEY, similarity_threshold=0.5, **env)
+    settings = Settings(_env_file=None, similarity_threshold=0.5, **env)
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_retriever] = lambda: FakeRetriever([make_hit(1)])
     app.dependency_overrides[get_provider] = lambda: provider
     app.dependency_overrides[get_store] = lambda: store
-    return TestClient(app, headers=AUTH), store
+    return TestClient(app, headers=login(store, sessions=[SESSION])), store
 
 
 def ask(client):

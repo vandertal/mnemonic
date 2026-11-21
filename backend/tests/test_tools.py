@@ -9,8 +9,8 @@ from mnemonic.schemas import ToolCall
 from mnemonic.security import get_global_limiter
 from mnemonic.tools import calculate, run_tool
 
-from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, make_hit
-from .test_chat import chat_body, parse_events
+from .fakes import FakeRetriever, MemoryStore, login, make_hit
+from .test_chat import SESSION, chat_body, parse_events
 
 # --- calculator ----------------------------------------------------------------------------
 
@@ -77,13 +77,13 @@ CALL = ToolCall(name="calculator", args={"expression": "3*12+2*7"})
 def tool_client(provider: FakeProvider, store: MemoryStore, budget: int = 1000):
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, app_api_key=KEY, similarity_threshold=0.5
+        _env_file=None, similarity_threshold=0.5
     )
     app.dependency_overrides[get_retriever] = lambda: FakeRetriever([make_hit(1)])
     app.dependency_overrides[get_provider] = lambda: provider
     limiter = SlidingWindowLimiter(budget)
     app.dependency_overrides[get_global_limiter] = lambda: limiter
-    return TestClient(app, headers=AUTH)
+    return TestClient(app, headers=login(store, sessions=[SESSION]))
 
 
 def test_tool_call_is_run_and_the_model_answers_with_the_result():

@@ -1,21 +1,24 @@
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator, Iterable
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from mnemonic.auth import create_access_token
+from mnemonic.config import Settings
 from mnemonic.retrieval import Hit
 from mnemonic.schemas import Message
 from mnemonic.store import (
+    DEFAULT_TITLE,
     Chunk,
     EmailTaken,
     LLMCall,
+    Session,
+    SessionNotFound,
     StoredDocument,
     StoredMessage,
     TooManyDocuments,
     User,
+    first_line_title,
 )
-
-KEY = "test-key"
-AUTH = {"X-API-Key": KEY}
 
 
 def make_hit(id: int, similarity: float = 0.9) -> Hit:
@@ -58,6 +61,7 @@ class MemoryStore:
     """In-memory Store: records messages and LLM calls. No database."""
 
     def __init__(self) -> None:
+        self.sessions: dict[UUID, tuple[UUID, Session]] = {}  # id -> (owner, session)
         self.messages: dict[UUID, list[StoredMessage]] = {}
         self.llm_calls: list[LLMCall] = []
         self.chunks: dict[int, Chunk] = {}
@@ -68,6 +72,7 @@ class MemoryStore:
         self._next_id = 0
         self._next_chunk_id = 1000
         self._next_doc_id = 0
+        self._ticks = 0
 
     def create_user(self, email: str, password_hash: str) -> User:
         if any(u.email == email for u, _ in self.users.values()):
@@ -83,16 +88,84 @@ class MemoryStore:
         entry = self.users.get(user_id)
         return entry[0] if entry else None
 
+    def _now(self) -> datetime:
+        """A strictly increasing fake clock, so 'newest first' is never a tie."""
+        self._ticks += 1
+        return datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=self._ticks)
+
+    def delete_user(self, user_id: UUID) -> bool:
+        if self.users.pop(user_id, None) is None:
+            return False
+        for sid in [i for i, (owner, _) in self.sessions.items() if owner == user_id]:
+            self.delete_session(user_id, sid)
+        for did in [i for i, (owner, _) in self.documents.items() if owner == user_id]:
+            self.delete_document(user_id, did)
+        return True
+
+    def seed_session(self, user_id: UUID, session_id: UUID, title: str = DEFAULT_TITLE) -> Session:
+        """Test helper: a session with a chosen id (the real store always generates it)."""
+        now = self._now()
+        session = Session(session_id, title, now, now)
+        self.sessions[session_id] = (user_id, session)
+        return session
+
+    def create_session(self, user_id: UUID, title: str | None = None) -> Session:
+        return self.seed_session(user_id, uuid4(), title or DEFAULT_TITLE)
+
+    def list_sessions(self, user_id: UUID, limit: int, offset: int) -> tuple[list[Session], int]:
+        mine = sorted(
+            (s for owner, s in self.sessions.values() if owner == user_id),
+            key=lambda s: (-s.updated_at.timestamp(), str(s.id)),
+        )
+        return mine[offset : offset + limit], len(mine)
+
+    def get_session(self, user_id: UUID, session_id: UUID) -> Session | None:
+        entry = self.sessions.get(session_id)
+        return entry[1] if entry and entry[0] == user_id else None
+
+    def rename_session(self, user_id: UUID, session_id: UUID, title: str) -> Session | None:
+        session = self.get_session(user_id, session_id)
+        if session is None:
+            return None
+        renamed = Session(session.id, title, session.created_at, session.updated_at)
+        self.sessions[session_id] = (user_id, renamed)
+        return renamed
+
+    def delete_session(self, user_id: UUID, session_id: UUID) -> bool:
+        if self.get_session(user_id, session_id) is None:
+            return False
+        del self.sessions[session_id]
+        self.messages.pop(session_id, None)
+        self.llm_calls = [c for c in self.llm_calls if c.session_id != session_id]
+        return True
+
     def add_message(
-        self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        role: str,
+        content: str,
+        sources: list[dict] | None = None,
     ) -> int:
+        session = self.get_session(user_id, session_id)
+        if session is None:
+            raise SessionNotFound
+        title = session.title
+        if title == DEFAULT_TITLE and role == "user" and first_line_title(content):
+            title = first_line_title(content)
+        self.sessions[session_id] = (
+            user_id,
+            Session(session.id, title, session.created_at, self._now()),
+        )
         self._next_id += 1
         self.messages.setdefault(session_id, []).append(
             StoredMessage(role, content, sources, datetime.now(UTC), self._next_id)
         )
         return self._next_id
 
-    def get_messages(self, session_id: UUID) -> list[StoredMessage]:
+    def get_messages(self, user_id: UUID, session_id: UUID) -> list[StoredMessage] | None:
+        if self.get_session(user_id, session_id) is None:
+            return None
         return list(self.messages.get(session_id, []))
 
     def log_llm_call(self, call: LLMCall) -> None:
@@ -135,3 +208,19 @@ class MemoryStore:
         for cid in [c for c, d in self.chunk_document.items() if d == document_id]:
             del self.chunks[cid], self.chunk_owner[cid], self.chunk_document[cid]
         return True
+
+
+def login(store: MemoryStore, email: str = "alice@example.com", sessions: Iterable[UUID] = ()):
+    """The one way tests authenticate: get-or-create the account, give it the listed sessions
+    (by id) and return the Authorization header with a real signed token."""
+    found = store.get_user_by_email(email)
+    user = found[0] if found else store.create_user(email, "not-a-real-hash")
+    for session_id in sessions:
+        if store.get_session(user.id, session_id) is None:
+            store.seed_session(user.id, session_id)
+    token = create_access_token(user.id, Settings(_env_file=None))
+    return {"Authorization": f"Bearer {token}"}
+
+
+def user_id(store: MemoryStore, email: str = "alice@example.com") -> UUID:
+    return store.get_user_by_email(email)[0].id
