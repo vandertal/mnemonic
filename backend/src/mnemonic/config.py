@@ -6,9 +6,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
-    # Shared secret the client must send in the X-API-Key header. The app refuses to start
-    # without it, so a deploy can never be accidentally open to everyone.
-    app_api_key: str = ""
     # Secret that signs the access tokens (HS256). Required, >= 32 chars; whoever has it can
     # forge a login. Generate: uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
     jwt_secret: str = ""

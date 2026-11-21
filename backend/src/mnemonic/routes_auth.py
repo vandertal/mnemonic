@@ -1,10 +1,10 @@
-"""Account endpoints: register, login, me."""
+"""Account endpoints: register, login, me, delete me."""
 
 import asyncio
 import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from mnemonic.auth import (
@@ -15,6 +15,7 @@ from mnemonic.auth import (
     verify_password,
 )
 from mnemonic.config import Settings, get_settings
+from mnemonic.openapi import R401, R422, R429
 from mnemonic.schemas import RegisterRequest, TokenOut, UserOut
 from mnemonic.security import limit_auth_per_ip
 from mnemonic.store import EmailTaken, Store, User, get_store
@@ -31,9 +32,13 @@ def normalize_email(email: str) -> str:
     status_code=201,
     response_model=UserOut,
     dependencies=[Depends(limit_auth_per_ip)],
+    summary="Register",
+    description="Create an account. The password is stored only as an argon2id hash.",
     responses={
         403: {"description": "Wrong or missing registration code"},
         409: {"description": "Email already registered"},
+        422: R422,
+        429: R429,
     },
 )
 async def register(
@@ -61,7 +66,9 @@ async def register(
     "/login",
     response_model=TokenOut,
     dependencies=[Depends(limit_auth_per_ip)],
-    responses={401: {"description": "Wrong email or password"}},
+    summary="Log in",
+    description="OAuth2 password form: `username` is the email. Returns a Bearer token (24 h).",
+    responses={401: {"description": "Wrong email or password"}, 422: R422, 429: R429},
 )
 async def login(
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
@@ -85,7 +92,27 @@ async def login(
     )
 
 
-@router.get("/me", response_model=UserOut, responses={401: {"description": "Invalid token"}})
+@router.get(
+    "/me",
+    response_model=UserOut,
+    summary="Who am I",
+    description="The account the Bearer token belongs to.",
+    responses={401: R401},
+)
 async def me(user: Annotated[User, Depends(get_current_user)]) -> User:
-    """The account the Bearer token belongs to."""
     return user
+
+
+@router.delete(
+    "/me",
+    status_code=204,
+    summary="Delete my account",
+    description="Permanently deletes the account with all its sessions, messages, documents and "
+    "chunks. The token stops working at once.",
+    responses={401: R401},
+)
+async def delete_me(
+    user: Annotated[User, Depends(get_current_user)], store: Annotated[Store, Depends(get_store)]
+) -> Response:
+    await asyncio.to_thread(store.delete_user, user.id)  # the rest goes by ON DELETE CASCADE
+    return Response(status_code=204)

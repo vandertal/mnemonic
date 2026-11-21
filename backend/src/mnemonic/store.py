@@ -57,6 +57,18 @@ class StoredDocument:
     chunks: int
 
 
+DEFAULT_TITLE = "New chat"
+TITLE_FROM_MESSAGE_CHARS = 60
+
+
+@dataclass(frozen=True)
+class Session:
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
 @dataclass(frozen=True)
 class User:
     id: UUID
@@ -66,6 +78,10 @@ class User:
 
 class EmailTaken(Exception):
     """An account with this email already exists."""
+
+
+class SessionNotFound(Exception):
+    """The session does not exist or is not the caller's (the two are never told apart)."""
 
 
 class TooManyDocuments(Exception):
@@ -85,13 +101,39 @@ class Store(Protocol):
 
     def get_user(self, user_id: UUID) -> User | None: ...
 
-    def add_message(
-        self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
-    ) -> int:
-        """Append a message and return its id; the session row is created on first use."""
+    def delete_user(self, user_id: UUID) -> bool:
+        """Delete the account; sessions, documents and chunks go with it (ON DELETE CASCADE)."""
         ...
 
-    def get_messages(self, session_id: UUID) -> list[StoredMessage]: ...
+    def create_session(self, user_id: UUID, title: str | None = None) -> Session: ...
+
+    def list_sessions(self, user_id: UUID, limit: int, offset: int) -> tuple[list[Session], int]:
+        """One page of the user's sessions (newest `updated_at` first) and the total count."""
+        ...
+
+    def get_session(self, user_id: UUID, session_id: UUID) -> Session | None:
+        """None if it does not exist OR belongs to someone else."""
+        ...
+
+    def rename_session(self, user_id: UUID, session_id: UUID, title: str) -> Session | None: ...
+
+    def delete_session(self, user_id: UUID, session_id: UUID) -> bool: ...
+
+    def add_message(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        role: str,
+        content: str,
+        sources: list[dict] | None = None,
+    ) -> int:
+        """Append a message to the user's session and return its id. Bumps `updated_at`; a user
+        message also becomes the title while it is still the default. Raises SessionNotFound."""
+        ...
+
+    def get_messages(self, user_id: UUID, session_id: UUID) -> list[StoredMessage] | None:
+        """Messages oldest first, or None if the session is not the user's / not there."""
+        ...
 
     def log_llm_call(self, call: LLMCall) -> None: ...
 
@@ -118,6 +160,11 @@ class Store(Protocol):
     def delete_document(self, owner_id: UUID, document_id: int) -> bool:
         """Delete the owner's document and its chunks. False if it is not theirs / not there."""
         ...
+
+
+def first_line_title(content: str) -> str:
+    """A chat title from its first message: whitespace collapsed, cut to 60 characters."""
+    return " ".join(content.split())[:TITLE_FROM_MESSAGE_CHARS]
 
 
 class PgStore:
@@ -160,13 +207,83 @@ class PgStore:
             ).fetchone()
         return None if row is None else User(*row)
 
+    def delete_user(self, user_id: UUID) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "DELETE FROM users WHERE id = %s RETURNING id", (user_id,)
+            ).fetchone()
+        return row is not None
+
+    # Ownership is part of every query below (`AND user_id = %s`): we never fetch a row and compare
+    # the owner in Python, so there is no code path that forgets the comparison.
+
+    def create_session(self, user_id: UUID, title: str | None = None) -> Session:
+        with self._connect() as conn:
+            row = conn.execute(
+                "INSERT INTO sessions (id, user_id, title) VALUES (gen_random_uuid(), %s, %s) "
+                "RETURNING id, title, created_at, updated_at",
+                (user_id, title or DEFAULT_TITLE),
+            ).fetchone()
+        return Session(*row)
+
+    def list_sessions(self, user_id: UUID, limit: int, offset: int) -> tuple[list[Session], int]:
+        with self._connect() as conn:
+            # `id` breaks ties, so equal timestamps cannot reorder rows between two pages.
+            rows = conn.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions WHERE user_id = %s "
+                "ORDER BY updated_at DESC, id LIMIT %s OFFSET %s",
+                (user_id, limit, offset),
+            ).fetchall()
+            (total,) = conn.execute(
+                "SELECT count(*) FROM sessions WHERE user_id = %s", (user_id,)
+            ).fetchone()
+        return [Session(*row) for row in rows], total
+
+    def get_session(self, user_id: UUID, session_id: UUID) -> Session | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions "
+                "WHERE id = %s AND user_id = %s",
+                (session_id, user_id),
+            ).fetchone()
+        return None if row is None else Session(*row)
+
+    def rename_session(self, user_id: UUID, session_id: UUID, title: str) -> Session | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "UPDATE sessions SET title = %s WHERE id = %s AND user_id = %s "
+                "RETURNING id, title, created_at, updated_at",
+                (title, session_id, user_id),
+            ).fetchone()
+        return None if row is None else Session(*row)
+
+    def delete_session(self, user_id: UUID, session_id: UUID) -> bool:
+        with self._connect() as conn:
+            # messages and llm_calls go with it: both reference sessions ON DELETE CASCADE.
+            row = conn.execute(
+                "DELETE FROM sessions WHERE id = %s AND user_id = %s RETURNING id",
+                (session_id, user_id),
+            ).fetchone()
+        return row is not None
+
     def add_message(
-        self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        role: str,
+        content: str,
+        sources: list[dict] | None = None,
     ) -> int:
-        with self._connect() as conn:  # one transaction: the session row and the message
-            conn.execute(
-                "INSERT INTO sessions (id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
+        new_title = (first_line_title(content) or None) if role == "user" else None
+        with self._connect() as conn:  # one transaction: the session bump and the message
+            bumped = conn.execute(
+                "UPDATE sessions SET updated_at = now(), "
+                "title = CASE WHEN title = %s THEN COALESCE(%s::text, title) ELSE title END "
+                "WHERE id = %s AND user_id = %s RETURNING id",
+                (DEFAULT_TITLE, new_title, session_id, user_id),
+            ).fetchone()
+            if bumped is None:
+                raise SessionNotFound
             row = conn.execute(
                 "INSERT INTO messages (session_id, role, content, sources) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -174,8 +291,13 @@ class PgStore:
             ).fetchone()
         return row[0]
 
-    def get_messages(self, session_id: UUID) -> list[StoredMessage]:
+    def get_messages(self, user_id: UUID, session_id: UUID) -> list[StoredMessage] | None:
         with self._connect() as conn:
+            owned = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = %s AND user_id = %s", (session_id, user_id)
+            ).fetchone()
+            if owned is None:
+                return None
             rows = conn.execute(
                 "SELECT role, content, sources, created_at, id FROM messages "
                 "WHERE session_id = %s ORDER BY id",

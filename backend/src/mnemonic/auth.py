@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from pwdlib import PasswordHash
 
@@ -61,6 +61,7 @@ def invalid_token() -> HTTPException:
 
 
 async def get_current_user(
+    request: Request,
     token: Annotated[str | None, Depends(oauth2_scheme)],
     settings: Annotated[Settings, Depends(get_settings)],
     store: Annotated[Store, Depends(get_store)],
@@ -75,4 +76,5 @@ async def get_current_user(
     user = await asyncio.to_thread(store.get_user, user_id)
     if user is None:  # a valid token of a deleted account
         raise invalid_token()
+    request.state.user_id = user.id  # read by the access-log middleware
     return user

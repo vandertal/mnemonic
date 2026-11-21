@@ -1,29 +1,14 @@
-"""API-key gate and rate-limit dependencies for the protected endpoints."""
+"""Rate-limit dependencies for the protected endpoints."""
 
-import secrets
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
-from mnemonic.config import Settings, get_settings
+from mnemonic.config import get_settings
 from mnemonic.limits import SlidingWindowLimiter, client_ip, retry_after_header
 
 BUSY_MESSAGE = "The service is busy right now. Please try again in a minute."
-
-
-def require_api_key(
-    settings: Annotated[Settings, Depends(get_settings)],
-    x_api_key: Annotated[str | None, Header()] = None,
-) -> None:
-    # compare_digest takes the same time wherever the strings differ (no timing leak);
-    # it needs bytes because str with non-ASCII characters raises TypeError.
-    if (
-        not settings.app_api_key
-        or x_api_key is None
-        or not secrets.compare_digest(x_api_key.encode(), settings.app_api_key.encode())
-    ):
-        raise HTTPException(status_code=401, detail="Missing or invalid API key")
 
 
 @lru_cache
