@@ -81,4 +81,4 @@ The **.env / CORS / old-deploy chain**: the deployed SPA kept calling the wrong 
 ## Status
 - [~] M1 — code done, deployed pending developer
 - [~] M2 — done, pending manual check (offline mid-action, 375px, real upload/delete, flashcards on the deployed backend)
-- [~] M3 — code done (perf, a11y, meta, README, reflection draft). Pending developer: Lighthouse run, phone check, 60s recording, fill `TODO_LIVE_URL`, rewrite Reflection, tag `lab-22`. Cmd+K palette waiting on the `cmdk` install permission.
+- [x] M3 — closed 2026-11-21, tag `lab-22`, Lighthouse mobile ≥90. Open debt: Reflection rewrite, recording, TODO_LIVE_URL. Code done (perf, a11y, meta, README, reflection draft). Pending developer: Lighthouse run, phone check, 60s recording, fill `TODO_LIVE_URL`, rewrite Reflection, tag `lab-22`. Cmd+K palette waiting on the `cmdk` install permission.

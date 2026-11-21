@@ -1,7 +1,6 @@
 # Roadmap
 
-Track: **31 → 22 → 21 → 33 → 34 → 42** (Track B + SPA, swap 32 → 21 — confirm with the teacher).
-Fallback without the swap: 31 → 21 → 22 → 32 → 33 → 34 → 42.
+Track: **31 → 22 → 21 → 33 → 34 → 42** (Track B + SPA, swap 32 → 21 — confirmed).
 
 Target: **Standard** in every lab, **Advanced** where time allows.
 Lab briefs: `../Programming-Practice-Projects/labs/`.
@@ -19,13 +18,12 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 
 - [x] 0. Setup — tools, repository, CLAUDE.md, docs
 - [x] 31 — LLM RAG App · core: chat over documents with citations (Standard + Advanced; open: 5+ real users, hard billing limit, Ollama deferred)
-- [ ] **22 — SPA Frontend** · chat + documents + flashcard screen ← next
-- [ ] 21 — REST API With Auth · accounts, tests, CI/CD
+- [x] 22 — SPA Frontend · chat, documents, flashcards, uk/en, themes; live on Cloudflare; Lighthouse ≥90 (open: Reflection rewrite in own words, 60s recording, Cmd+K skipped)
+- [ ] **21 — REST API With Auth** · accounts, tests, CI/CD ← next
 - [ ] 33 — Object Detection & Tracking · image flashcards
 - [ ] 34 — AI Capstone · real users, landing, metrics
 - [ ] 42 — Life, the Universe, and Everything · MANIFESTO, video, retro
 
 ## Current lab
 
-**Lab 31 — closed (2026-11-20), tag `lab-31`.** Plan and results: [`docs/labs/lab-31.md`](labs/lab-31.md). Open items: 5+ real users,
-hard billing limit, Ollama (M7c, deferred). **Next: lab 22 (SPA).**
+**Lab 22 — closed (2026-11-21), tag `lab-22`.** Plan and results: [`docs/labs/lab-22.md`](labs/lab-22.md). **Next: lab 21 (REST API with auth).**
