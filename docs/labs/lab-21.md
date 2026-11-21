@@ -47,7 +47,7 @@ Main resource for the Basic CRUD requirement: **chat sessions** (create / list /
 
 ## Milestones (4)
 
-**M1 — Accounts (existing endpoints untouched).** [ ]
+**M1 — Accounts (existing endpoints untouched).** [x]
 Alembic baseline + `users`; `/auth/register|login|me`; argon2 in a thread; JWT; `JWT_SECRET` (required, ≥32 chars), `REGISTRATION_CODE`, auth rate limit; unit tests; ADR 0004. `X-API-Key` still works, so nothing live changes.
 Check: `alembic upgrade head` on the dev DB (and down/up); Swagger **Authorize** works; wrong password 401; duplicate email 409; the DB row is an argon2 hash.
 
