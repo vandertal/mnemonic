@@ -61,6 +61,9 @@ export function Review({ deck, onExit }: { deck: Deck; onExit: () => void }) {
         tabIndex={0}
         aria-pressed={flipped}
         onClick={() => setFlipped((f) => !f)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') setFlipped((f) => !f)
+        }}
         className={cn(
           'flex min-h-56 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border p-6 text-center shadow-sm transition-colors',
           flipped ? 'bg-accent-soft' : 'bg-card',
@@ -78,7 +81,7 @@ export function Review({ deck, onExit }: { deck: Deck; onExit: () => void }) {
           <ArrowLeft className="size-4" />
           {t('flashcards.prev')}
         </Button>
-        <span className="text-sm text-muted-foreground" aria-live="polite">
+        <span className="text-xs text-muted-foreground sm:text-sm" aria-live="polite">
           {t('flashcards.progress', { current: index + 1, total })}
         </span>
         <Button variant="outline" onClick={() => go(1)} disabled={index === total - 1}>

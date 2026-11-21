@@ -7,14 +7,14 @@
   --card: oklch(1 0 0);
   --card-foreground: var(--foreground);
   --muted: oklch(0.965 0.004 270);
-  --muted-foreground: oklch(0.52 0.01 270);
+  --muted-foreground: oklch(0.48 0.012 270); /* >= 4.5:1 on background, muted and accent-soft */
   --border: oklch(0.92 0.004 270);
   --input: oklch(0.9 0.005 270);
   --sidebar: oklch(0.975 0.004 270);
-  --accent: oklch(0.55 0.19 275); /* the single brand accent */
+  --accent: oklch(0.52 0.19 275); /* the single brand accent; also used as text, so AA on accent-soft */
   --accent-foreground: oklch(0.99 0 0);
   --accent-soft: oklch(0.95 0.03 275);
-  --destructive: oklch(0.58 0.22 27);
+  --destructive: oklch(0.54 0.22 27);
   --warning-soft: oklch(0.96 0.04 85);
   --warning-border: oklch(0.88 0.08 85);
   --ring: oklch(0.55 0.19 275 / 0.45);

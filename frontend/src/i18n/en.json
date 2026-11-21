@@ -132,7 +132,8 @@
     "server": "The server had a problem. Please try again."
   },
   "common": {
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "loading": "Loading…"
   },
   "offline": {
     "banner": "You're offline. Changes will work again when the connection returns."

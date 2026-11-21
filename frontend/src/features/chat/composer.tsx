@@ -33,7 +33,7 @@ export function Composer({ busy, onSend, onStop }: { busy: boolean; onSend: (tex
   }
 
   return (
-    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-md">
+    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-md transition-shadow focus-within:ring-2 focus-within:ring-ring">
       <textarea
         ref={ref}
         rows={1}

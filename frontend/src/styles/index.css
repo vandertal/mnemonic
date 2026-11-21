@@ -65,7 +65,16 @@
   animation: caret 1s steps(1) infinite;
 }
 
+/* Respect the OS setting: no pulsing skeletons, spinners, caret blink or sliding transitions. */
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .streaming-caret > :last-child::after {
     animation: none;
   }

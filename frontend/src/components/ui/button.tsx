@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const buttonVariants = cva(
-  'inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 cursor-pointer',
+  'inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors active:translate-y-px disabled:pointer-events-none disabled:opacity-50 cursor-pointer',
   {
     variants: {
       variant: {

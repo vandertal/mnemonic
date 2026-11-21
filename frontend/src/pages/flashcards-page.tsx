@@ -78,7 +78,7 @@ export default function FlashcardsPage() {
                   <button
                     type="button"
                     onClick={() => setOpenId(d.id)}
-                    className="h-full w-full cursor-pointer rounded-lg border bg-card p-4 text-left shadow-sm transition-colors hover:bg-muted"
+                    className="h-full w-full cursor-pointer rounded-lg border bg-card p-4 text-left shadow-sm transition-colors hover:bg-muted active:translate-y-px"
                   >
                     <span className="line-clamp-2 block text-sm font-medium">{d.question}</span>
                     <span className="mt-2 block text-xs text-muted-foreground">
