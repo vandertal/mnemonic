@@ -19,11 +19,11 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 - [x] 0. Setup — tools, repository, CLAUDE.md, docs
 - [x] 31 — LLM RAG App · core: chat over documents with citations (Standard + Advanced; open: 5+ real users, hard billing limit, Ollama deferred)
 - [x] 22 — SPA Frontend · chat, documents, flashcards, uk/en, themes; live on Cloudflare; Lighthouse ≥90 (open: Reflection rewrite in own words, 60s recording, Cmd+K skipped)
-- [ ] **21 — REST API With Auth** · accounts, tests, CI/CD ← next
+- [ ] **21 — REST API With Auth** · accounts, tests, CI/CD ← in progress (M1 of 4, branch `lab-21`)
 - [ ] 33 — Object Detection & Tracking · image flashcards
 - [ ] 34 — AI Capstone · real users, landing, metrics
 - [ ] 42 — Life, the Universe, and Everything · MANIFESTO, video, retro
 
 ## Current lab
 
-**Lab 22 — closed (2026-11-21), tag `lab-22`.** Plan and results: [`docs/labs/lab-22.md`](labs/lab-22.md). **Next: lab 21 (REST API with auth).**
+**Lab 21 — in progress.** Plan: [`docs/labs/lab-21.md`](labs/lab-21.md). Lab 22 closed (2026-11-21), tag `lab-22`.
