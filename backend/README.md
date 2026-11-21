@@ -28,8 +28,33 @@ Set `JWT_SECRET` in `.env` (at least 32 chars; the app will not start without it
 uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Endpoints: `POST /auth/register`, `POST /auth/login` (form), `GET /auth/me`. Try them in `/docs` (Authorize),
-or against a running server: `uv run python scripts/auth_smoke.py http://127.0.0.1:8000`.
+Try them in `/docs` (Authorize), or against a running server:
+`uv run python scripts/auth_smoke.py http://127.0.0.1:8000`.
+
+## Endpoints
+
+Everything except `/auth/register`, `/auth/login`, `/health` and `/` needs `Authorization: Bearer <token>`
+and only sees the rows of that account. Someone else's id answers **404**, like a missing one.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/auth/register` | 201; 409 taken email; 403 wrong registration code |
+| POST | `/auth/login` | OAuth2 form (`username` = email) -> token |
+| GET / DELETE | `/auth/me` | who am I / delete my account and all its data (204) |
+| POST / GET | `/sessions` | create (201) / list: `?limit=20&offset=0` -> `{items, total, limit, offset, next}` |
+| GET / PATCH / DELETE | `/sessions/{id}` | read / rename `{title}` / delete (204) |
+| GET | `/sessions/{id}/messages` | chat history |
+| POST | `/chat` | `{session_id, message}` -> SSE stream |
+| POST | `/flashcards` | `{session_id, message_id}` -> 3-5 cards |
+| GET / POST | `/documents` | list / upload (.md, .txt, .pdf) |
+| DELETE | `/documents/{id}` | 204 |
+| GET | `/chunks/{id}` | text behind a citation |
+| GET | `/health` | liveness, no auth, no database |
+
+Every request is logged as one JSON line on the `mnemonic.access` logger (no headers, query strings or bodies).
+
+Ownership smoke test (real server, real database, two accounts that clean up after themselves):
+`uv run python scripts/ownership_smoke.py http://127.0.0.1:8000`.
 
 ## Ingest
 
