@@ -55,7 +55,7 @@ Check: `alembic upgrade head` on the dev DB (and down/up); Swagger **Authorize**
 Bearer on every data endpoint, `owner_id` / `X-API-Key` removed; migration 0003 (wipe legacy rows, `user_id` on sessions, FK owner → users); `/sessions` CRUD + pagination (`limit`/`offset`, `total`, `next`); `DELETE /auth/me`; JSON request logs (method, path, user, duration, status); `/health`; OpenAPI polish.
 Check: Alice/Bob matrix — Bob gets 404 on Alice's session, document, chunk, flashcards; no token → 401.
 
-**M3 — SPA + deploy.** [ ]
+**M3 — SPA + deploy.** [ ] — SPA code part done (login/register, Bearer client, server sessions, smoke); deploy part still open
 Login/register pages, token in `api/client.ts`, 401 → login, access-code gate removed, sessions list from the server, i18n uk/en, smoke script updated. Then: merge `lab-21` → `main`, set `JWT_SECRET` (+ optional `REGISTRATION_CODE`) on Render, start command runs `alembic upgrade head`.
 Check: register + chat + upload on the live URL; second account sees nothing of the first.
 
