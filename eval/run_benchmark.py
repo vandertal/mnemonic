@@ -6,7 +6,7 @@ Same 10 questions as run_eval.py (eval.json).
           alone, no system prompt, no context.
 
 Usage (from the repo root; `uv run --project backend` gives the backend's dependencies):
-    $env:APP_API_KEY = "..."; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
+    $env:EVAL_EMAIL = "..."; $env:EVAL_PASSWORD = "..."; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
     uv run --project backend python eval/run_benchmark.py
 
 Writes eval/benchmark.md. A hand-written "## Conclusion" section in the old file is kept.
@@ -22,7 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))  # run_eval.py lives next to this file
-import run_eval  # noqa: E402  (its module-level config reads BASE_URL, APP_API_KEY, GLOBAL_RPM)
+import run_eval  # noqa: E402  (its module-level config reads BASE_URL, EVAL_EMAIL, EVAL_PASSWORD, GLOBAL_RPM)
 
 from mnemonic.config import Settings  # noqa: E402
 from mnemonic.llm.factory import build_provider, model_name  # noqa: E402
@@ -77,9 +77,13 @@ def pct(x: float) -> str:
 
 
 def main() -> int:
-    if not run_eval.API_KEY:
-        print("Set APP_API_KEY in the environment.")
+    if not (run_eval.EMAIL and run_eval.PASSWORD):
+        print("Set EVAL_EMAIL and EVAL_PASSWORD (an existing account) in the environment.")
         return 1
+    token = run_eval.login()
+    if token is None:
+        return 1
+    run_eval.TOKEN = token
     items = json.loads((HERE / "eval.json").read_text(encoding="utf-8"))
     # backend/.env explicitly: the repo root is the working directory here, not backend/.
     settings = Settings(_env_file=HERE.parent / "backend" / ".env")

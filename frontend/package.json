@@ -6,7 +6,9 @@
   "scripts": {
     "predev": "node scripts/check-env.mjs",
     "dev": "vite",
+    "doctor": "node scripts/check-env.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "test": "vitest run",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -40,6 +42,7 @@
     "oxlint": "^1.90.0",
     "tailwindcss": "^4.3.5",
     "typescript": "~7.0.2",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.1"
   }
 }

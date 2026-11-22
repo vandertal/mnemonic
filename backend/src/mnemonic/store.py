@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Literal, Protocol
 from uuid import UUID
 
@@ -12,39 +13,8 @@ import psycopg
 from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 
-from mnemonic.ingest import db as chunks_db
+from mnemonic.config import get_settings
 from mnemonic.ingest.chunker import Chunk as NewChunk
-
-# Created at app startup; every statement is idempotent. No migrations yet (Alembic: lab 21).
-# The chunks / documents tables are created by `chunks_db.SCHEMA`, which init_schema runs first.
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS sessions (
-    id         uuid PRIMARY KEY,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         bigserial PRIMARY KEY,
-    session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    role       text NOT NULL CHECK (role IN ('user', 'assistant')),
-    content    text NOT NULL,
-    sources    jsonb,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS messages_session_idx ON messages (session_id, id);
-
-CREATE TABLE IF NOT EXISTS llm_calls (
-    id         bigserial PRIMARY KEY,
-    session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    model      text NOT NULL,
-    tokens_in  integer NOT NULL,
-    tokens_out integer NOT NULL,
-    cost_usd   numeric(12, 8) NOT NULL,
-    latency_ms integer NOT NULL,
-    status     text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-"""
 
 
 @dataclass(frozen=True)
@@ -87,6 +57,33 @@ class StoredDocument:
     chunks: int
 
 
+DEFAULT_TITLE = "New chat"
+TITLE_FROM_MESSAGE_CHARS = 60
+
+
+@dataclass(frozen=True)
+class Session:
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class User:
+    id: UUID
+    email: str
+    created_at: datetime
+
+
+class EmailTaken(Exception):
+    """An account with this email already exists."""
+
+
+class SessionNotFound(Exception):
+    """The session does not exist or is not the caller's (the two are never told apart)."""
+
+
 class TooManyDocuments(Exception):
     """The owner already has the maximum number of documents."""
 
@@ -94,15 +91,49 @@ class TooManyDocuments(Exception):
 class Store(Protocol):
     """Blocking API: call it from a worker thread (asyncio.to_thread)."""
 
-    def init_schema(self) -> None: ...
-
-    def add_message(
-        self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
-    ) -> int:
-        """Append a message and return its id; the session row is created on first use."""
+    def create_user(self, email: str, password_hash: str) -> User:
+        """Insert an account; raises EmailTaken if the (lower-cased) email exists."""
         ...
 
-    def get_messages(self, session_id: UUID) -> list[StoredMessage]: ...
+    def get_user_by_email(self, email: str) -> tuple[User, str] | None:
+        """The user and their password hash, or None."""
+        ...
+
+    def get_user(self, user_id: UUID) -> User | None: ...
+
+    def delete_user(self, user_id: UUID) -> bool:
+        """Delete the account; sessions, documents and chunks go with it (ON DELETE CASCADE)."""
+        ...
+
+    def create_session(self, user_id: UUID, title: str | None = None) -> Session: ...
+
+    def list_sessions(self, user_id: UUID, limit: int, offset: int) -> tuple[list[Session], int]:
+        """One page of the user's sessions (newest `updated_at` first) and the total count."""
+        ...
+
+    def get_session(self, user_id: UUID, session_id: UUID) -> Session | None:
+        """None if it does not exist OR belongs to someone else."""
+        ...
+
+    def rename_session(self, user_id: UUID, session_id: UUID, title: str) -> Session | None: ...
+
+    def delete_session(self, user_id: UUID, session_id: UUID) -> bool: ...
+
+    def add_message(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        role: str,
+        content: str,
+        sources: list[dict] | None = None,
+    ) -> int:
+        """Append a message to the user's session and return its id. Bumps `updated_at`; a user
+        message also becomes the title while it is still the default. Raises SessionNotFound."""
+        ...
+
+    def get_messages(self, user_id: UUID, session_id: UUID) -> list[StoredMessage] | None:
+        """Messages oldest first, or None if the session is not the user's / not there."""
+        ...
 
     def log_llm_call(self, call: LLMCall) -> None: ...
 
@@ -131,6 +162,11 @@ class Store(Protocol):
         ...
 
 
+def first_line_title(content: str) -> str:
+    """A chat title from its first message: whitespace collapsed, cut to 60 characters."""
+    return " ".join(content.split())[:TITLE_FROM_MESSAGE_CHARS]
+
+
 class PgStore:
     def __init__(self, database_url: str) -> None:
         self._url = database_url
@@ -142,18 +178,112 @@ class PgStore:
         # callers commits and closes it.
         return psycopg.connect(self._url)
 
-    def init_schema(self) -> None:
+    def create_user(self, email: str, password_hash: str) -> User:
+        # No "check, then insert": two parallel requests could both pass the check. The UNIQUE
+        # constraint is the only race-free referee, so we insert and translate its error.
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "INSERT INTO users (email, password_hash) VALUES (%s, %s) "
+                    "RETURNING id, email, created_at",
+                    (email, password_hash),
+                ).fetchone()
+        except psycopg.errors.UniqueViolation:
+            raise EmailTaken from None
+        return User(*row)
+
+    def get_user_by_email(self, email: str) -> tuple[User, str] | None:
         with self._connect() as conn:
-            conn.execute(chunks_db.SCHEMA)  # chunks + documents (+ the M7a columns)
-            conn.execute(SCHEMA)
+            row = conn.execute(
+                "SELECT id, email, created_at, password_hash FROM users WHERE email = %s",
+                (email,),
+            ).fetchone()
+        return None if row is None else (User(*row[:3]), row[3])
+
+    def get_user(self, user_id: UUID) -> User | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, email, created_at FROM users WHERE id = %s", (user_id,)
+            ).fetchone()
+        return None if row is None else User(*row)
+
+    def delete_user(self, user_id: UUID) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "DELETE FROM users WHERE id = %s RETURNING id", (user_id,)
+            ).fetchone()
+        return row is not None
+
+    # Ownership is part of every query below (`AND user_id = %s`): we never fetch a row and compare
+    # the owner in Python, so there is no code path that forgets the comparison.
+
+    def create_session(self, user_id: UUID, title: str | None = None) -> Session:
+        with self._connect() as conn:
+            row = conn.execute(
+                "INSERT INTO sessions (id, user_id, title) VALUES (gen_random_uuid(), %s, %s) "
+                "RETURNING id, title, created_at, updated_at",
+                (user_id, title or DEFAULT_TITLE),
+            ).fetchone()
+        return Session(*row)
+
+    def list_sessions(self, user_id: UUID, limit: int, offset: int) -> tuple[list[Session], int]:
+        with self._connect() as conn:
+            # `id` breaks ties, so equal timestamps cannot reorder rows between two pages.
+            rows = conn.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions WHERE user_id = %s "
+                "ORDER BY updated_at DESC, id LIMIT %s OFFSET %s",
+                (user_id, limit, offset),
+            ).fetchall()
+            (total,) = conn.execute(
+                "SELECT count(*) FROM sessions WHERE user_id = %s", (user_id,)
+            ).fetchone()
+        return [Session(*row) for row in rows], total
+
+    def get_session(self, user_id: UUID, session_id: UUID) -> Session | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions "
+                "WHERE id = %s AND user_id = %s",
+                (session_id, user_id),
+            ).fetchone()
+        return None if row is None else Session(*row)
+
+    def rename_session(self, user_id: UUID, session_id: UUID, title: str) -> Session | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "UPDATE sessions SET title = %s WHERE id = %s AND user_id = %s "
+                "RETURNING id, title, created_at, updated_at",
+                (title, session_id, user_id),
+            ).fetchone()
+        return None if row is None else Session(*row)
+
+    def delete_session(self, user_id: UUID, session_id: UUID) -> bool:
+        with self._connect() as conn:
+            # messages and llm_calls go with it: both reference sessions ON DELETE CASCADE.
+            row = conn.execute(
+                "DELETE FROM sessions WHERE id = %s AND user_id = %s RETURNING id",
+                (session_id, user_id),
+            ).fetchone()
+        return row is not None
 
     def add_message(
-        self, session_id: UUID, role: str, content: str, sources: list[dict] | None = None
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        role: str,
+        content: str,
+        sources: list[dict] | None = None,
     ) -> int:
-        with self._connect() as conn:  # one transaction: the session row and the message
-            conn.execute(
-                "INSERT INTO sessions (id) VALUES (%s) ON CONFLICT DO NOTHING", (session_id,)
-            )
+        new_title = (first_line_title(content) or None) if role == "user" else None
+        with self._connect() as conn:  # one transaction: the session bump and the message
+            bumped = conn.execute(
+                "UPDATE sessions SET updated_at = now(), "
+                "title = CASE WHEN title = %s THEN COALESCE(%s::text, title) ELSE title END "
+                "WHERE id = %s AND user_id = %s RETURNING id",
+                (DEFAULT_TITLE, new_title, session_id, user_id),
+            ).fetchone()
+            if bumped is None:
+                raise SessionNotFound
             row = conn.execute(
                 "INSERT INTO messages (session_id, role, content, sources) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -161,8 +291,13 @@ class PgStore:
             ).fetchone()
         return row[0]
 
-    def get_messages(self, session_id: UUID) -> list[StoredMessage]:
+    def get_messages(self, user_id: UUID, session_id: UUID) -> list[StoredMessage] | None:
         with self._connect() as conn:
+            owned = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = %s AND user_id = %s", (session_id, user_id)
+            ).fetchone()
+            if owned is None:
+                return None
             rows = conn.execute(
                 "SELECT role, content, sources, created_at, id FROM messages "
                 "WHERE session_id = %s ORDER BY id",
@@ -266,3 +401,8 @@ class PgStore:
                     call.status,
                 ),
             )
+
+
+@lru_cache
+def get_store() -> Store:
+    return PgStore(get_settings().database_url)

@@ -19,7 +19,10 @@ export async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerato
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       // Normalise line endings, then split complete events off the front of the buffer.
-      buffer = buffer.replace(/\r\n?/g, '\n')
+      // A '\r' at the very end may be the first half of a '\r\n' split across two pieces: keep it
+      // raw until the next piece, or "\r" + "\n" would become two line breaks (a false event end).
+      const pendingCr = buffer.endsWith('\r')
+      buffer = (pendingCr ? buffer.slice(0, -1) : buffer).replace(/\r\n?/g, '\n') + (pendingCr ? '\r' : '')
       let end: number
       while ((end = buffer.indexOf('\n\n')) !== -1) {
         const block = buffer.slice(0, end)

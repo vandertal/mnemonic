@@ -1,12 +1,20 @@
-import { BookOpen } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { BookOpen, SearchX } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/card'
 import { Composer } from '@/features/chat/composer'
 import { MessageView } from '@/features/chat/message'
 import { useChat } from '@/features/chat/use-chat'
-import { useSessions } from '@/lib/sessions'
+import { EmptyState as NoticeState } from '@/components/empty-state'
+import {
+  SESSIONS_KEY,
+  useCreateSession,
+  useForgetSession,
+  useSessions,
+} from '@/features/sessions/use-sessions'
 
 function EmptyState({ onPick }: { onPick: (q: string) => void }) {
   const { t } = useTranslation()
@@ -36,16 +44,66 @@ function EmptyState({ onPick }: { onPick: (q: string) => void }) {
   )
 }
 
-/** Remounted per session (key= below): switching chats drops all local state and aborts a running stream. */
+/** /chat/:sessionId shows that chat; plain /chat opens the latest one (or makes the first). */
 export default function ChatPage() {
-  const { activeId } = useSessions()
-  return <ChatView key={activeId} sessionId={activeId} />
+  const { sessionId } = useParams()
+  // Remounted per session (key=): switching chats drops all local state and aborts a running stream.
+  return sessionId ? <ChatView key={sessionId} sessionId={sessionId} /> : <ChatHome />
+}
+
+function ChatHome() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { sessions, isPending, isError, refetch } = useSessions()
+  const create = useCreateSession()
+  const asked = useRef(false) // StrictMode runs effects twice: one blank chat, not two
+  const latest = sessions[0]
+
+  const makeFirst = () => {
+    asked.current = true
+    create.mutate(undefined, { onSuccess: (c) => navigate(`/chat/${c.id}`, { replace: true }) })
+  }
+  useEffect(() => {
+    if (!isPending && !isError && !latest && !asked.current) makeFirst()
+  })
+
+  if (latest) return <Navigate to={`/chat/${latest.id}`} replace />
+  if (isError || create.isError) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+        <p className="text-sm text-muted-foreground">{t('chat.sessionsFailed')}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            create.reset()
+            asked.current = false
+            void refetch()
+          }}
+        >
+          {t('chat.retry')}
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-6" role="status" aria-label={t('chat.loadingHistory')}>
+      <Skeleton className="ml-auto h-10 w-1/2" />
+      <Skeleton className="h-4 w-11/12" />
+    </div>
+  )
 }
 
 function ChatView({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation()
-  const { touch } = useSessions()
-  const { messages, history, busy, send, stop, reloadHistory } = useChat(sessionId, (q) => touch(sessionId, q))
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const forget = useForgetSession()
+  const { messages, history, busy, send, stop, reloadHistory } = useChat(sessionId, {
+    // The server sets the title when the first question is saved: refresh the sidebar.
+    onAnswered: () => void qc.invalidateQueries({ queryKey: SESSIONS_KEY }),
+    onNotFound: () => forget(sessionId),
+  })
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true) // follow the stream only while the reader is at the bottom
 
@@ -74,6 +132,13 @@ function ChatView({ sessionId }: { sessionId: string }) {
               <Skeleton className="h-4 w-11/12" />
               <Skeleton className="h-4 w-3/4" />
             </div>
+          ) : history === 'notFound' ? (
+            <NoticeState
+              icon={SearchX}
+              title={t('chat.notFoundTitle')}
+              text={t('chat.notFoundText')}
+              action={<Button onClick={() => navigate('/chat', { replace: true })}>{t('chat.openLatest')}</Button>}
+            />
           ) : history === 'error' ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
               <p className="text-sm text-muted-foreground">{t('chat.historyFailed')}</p>

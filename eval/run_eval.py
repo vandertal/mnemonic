@@ -1,7 +1,7 @@
 """Run the eval set against a running Mnemonic server over HTTP. No LLM judge, only string checks.
 
 Usage (from the repo root):
-    $env:APP_API_KEY = "..."; $env:BASE_URL = "http://localhost:8000"; $env:GEMINI_MODEL = "..."
+    $env:EVAL_EMAIL = "..."; $env:EVAL_PASSWORD = "..."; $env:BASE_URL = "http://localhost:8000"; $env:GEMINI_MODEL = "..."
     python eval/run_eval.py            # stdlib only, no extra dependencies
 
 Metrics:
@@ -16,14 +16,16 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-import uuid
 from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).parent
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
-API_KEY = os.environ.get("APP_API_KEY", "")
+EMAIL = os.environ.get("EVAL_EMAIL", "")
+PASSWORD = os.environ.get("EVAL_PASSWORD", "")
+TOKEN = ""  # set by login()
 MODEL = os.environ.get("GEMINI_MODEL") or "gemini-3.5-flash-lite (default)"
 GLOBAL_RPM = int(
     os.environ.get("GLOBAL_RPM") or 5
@@ -55,17 +57,34 @@ def parse_sse(stream) -> tuple[str, list[dict], str | None]:
     return "".join(answer), sources, error
 
 
+def login() -> str | None:
+    """POST /auth/login (form-encoded, username = email) -> Bearer token, or None on failure."""
+    form = urllib.parse.urlencode({"username": EMAIL, "password": PASSWORD}).encode()
+    req = urllib.request.Request(f"{BASE_URL}/auth/login", data=form)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)["access_token"]
+    except (urllib.error.URLError, KeyError, ValueError) as e:
+        print(f"Login failed: {e}")
+        return None
+
+
+def api(path: str, body: dict) -> urllib.request.Request:
+    return urllib.request.Request(
+        f"{BASE_URL}{path}",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}"},
+    )
+
+
 def ask(question: str) -> tuple[str, list[dict], str | None]:
-    """One question in a fresh session. On 429: wait Retry-After and retry once."""
-    body = json.dumps({"session_id": str(uuid.uuid4()), "message": question}).encode()
+    """One question in a fresh server-made session. On 429: wait Retry-After, retry once."""
     for attempt in (1, 2):
-        req = urllib.request.Request(
-            f"{BASE_URL}/chat",
-            data=body,
-            headers={"Content-Type": "application/json", "X-API-Key": API_KEY},
-        )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(api("/sessions", {}), timeout=30) as resp:
+                session_id = json.load(resp)["id"]
+            chat = api("/chat", {"session_id": session_id, "message": question})
+            with urllib.request.urlopen(chat, timeout=120) as resp:
                 return parse_sse(resp)
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt == 1:
@@ -80,9 +99,14 @@ def ask(question: str) -> tuple[str, list[dict], str | None]:
 
 
 def main() -> int:
-    if not API_KEY:
-        print("Set APP_API_KEY in the environment.")
+    global TOKEN
+    if not (EMAIL and PASSWORD):
+        print("Set EVAL_EMAIL and EVAL_PASSWORD (an existing account) in the environment.")
         return 1
+    token = login()
+    if token is None:
+        return 1
+    TOKEN = token
     items = json.loads((HERE / "eval.json").read_text(encoding="utf-8"))
     rows = []
     for i, item in enumerate(items, 1):

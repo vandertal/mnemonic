@@ -18,10 +18,10 @@ from mnemonic.rag import SYSTEM_PROMPT, build_messages, format_context
 from mnemonic.security import get_ip_limiter
 from mnemonic.store import Chunk
 
-from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, make_hit
+from .fakes import FakeRetriever, MemoryStore, login, make_hit, user_id
 
-ALICE = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-BOB = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+ALICE = "alice@example.com"
+BOB = "bob@example.com"
 SHARED_ID = 7
 
 MD = b"# Notes\n\nThe mitochondria is the powerhouse of the cell.\n"
@@ -73,13 +73,13 @@ def store():
 @pytest.fixture
 def make_client(store):
     def make(**settings) -> TestClient:
-        app.dependency_overrides[get_settings] = lambda: Settings(
-            _env_file=None, app_api_key=KEY, **settings
-        )
+        app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, **settings)
         app.dependency_overrides[get_store] = lambda: store
         app.dependency_overrides[get_embedder] = lambda: fake_embedder
         app.dependency_overrides[get_chunk_tokenizer] = lambda: WordTokenizer
-        return TestClient(app, headers=AUTH)
+        client = TestClient(app)
+        client.store = store  # so helpers can log a user in
+        return client
 
     return make
 
@@ -90,16 +90,22 @@ def client(make_client):
         yield c
 
 
+def hdr(client, who=ALICE) -> dict:
+    """Authorization header of that user (the account is created on first use)."""
+    return login(client.store, who)
+
+
 def upload(client, owner=ALICE, name="notes.md", data=MD, **kwargs):
     return client.post(
         "/documents",
-        data={"owner_id": str(owner)},
         files={"file": (name, data, "application/octet-stream")},
+        headers=hdr(client, owner),
         **kwargs,
     )
 
 
-def chunk_ids(store, owner) -> list[int]:
+def chunk_ids(store, who) -> list[int]:
+    owner = user_id(store, who)
     return [i for i, o in store.chunk_owner.items() if o == owner]
 
 
@@ -111,53 +117,60 @@ def test_upload_lists_and_stores_chunks(client, store):
     assert response.status_code == 201
     body = response.json()
     assert body["filename"] == "notes.md" and body["chunks"] == 1
-    assert [d["id"] for d in client.get(f"/documents?owner_id={ALICE}").json()] == [body["id"]]
+    assert [d["id"] for d in client.get("/documents", headers=hdr(client, ALICE)).json()] == [
+        body["id"]
+    ]
     (chunk,) = (store.chunks[chunk_ids(store, ALICE)[0]],)
     assert chunk.file_path == "notes.md" and chunk.heading == "Notes"
 
 
 def test_documents_are_private_to_their_owner(client):
     doc = upload(client).json()
-    assert client.get(f"/documents?owner_id={BOB}").json() == []
+    assert client.get("/documents", headers=hdr(client, BOB)).json() == []
     # Bob cannot delete it either, and it survives the attempt.
-    assert client.delete(f"/documents/{doc['id']}?owner_id={BOB}").status_code == 404
-    assert len(client.get(f"/documents?owner_id={ALICE}").json()) == 1
+    assert client.delete(f"/documents/{doc['id']}", headers=hdr(client, BOB)).status_code == 404
+    assert len(client.get("/documents", headers=hdr(client, ALICE)).json()) == 1
 
 
 def test_chunks_endpoint_hides_foreign_chunks(client, store):
     upload(client)
     (cid,) = chunk_ids(store, ALICE)
-    assert client.get(f"/chunks/{cid}?owner_id={ALICE}").status_code == 200
-    # Another owner and an anonymous caller get the same 404 as for a missing id.
-    assert client.get(f"/chunks/{cid}?owner_id={BOB}").status_code == 404
-    assert client.get(f"/chunks/{cid}").status_code == 404
-    assert client.get(f"/chunks/{cid + 1}?owner_id={ALICE}").status_code == 404
+    assert client.get(f"/chunks/{cid}", headers=hdr(client, ALICE)).status_code == 200
+    # Another user gets the same 404 as for a missing id.
+    assert client.get(f"/chunks/{cid}", headers=hdr(client, BOB)).status_code == 404
+    assert client.get(f"/chunks/{cid + 1}", headers=hdr(client, ALICE)).status_code == 404
     # Shared chunks stay visible to everybody.
-    assert client.get(f"/chunks/{SHARED_ID}?owner_id={BOB}").status_code == 200
-    assert client.get(f"/chunks/{SHARED_ID}").status_code == 200
+    assert client.get(f"/chunks/{SHARED_ID}", headers=hdr(client, BOB)).status_code == 200
+    assert client.get(f"/chunks/{SHARED_ID}", headers=hdr(client)).status_code == 200
 
 
 def test_delete_removes_the_documents_chunks(client, store):
     doc = upload(client).json()
     (cid,) = chunk_ids(store, ALICE)
-    assert client.delete(f"/documents/{doc['id']}?owner_id={ALICE}").status_code == 204
-    assert client.get(f"/documents?owner_id={ALICE}").json() == []
-    assert client.get(f"/chunks/{cid}?owner_id={ALICE}").status_code == 404
+    assert client.delete(f"/documents/{doc['id']}", headers=hdr(client, ALICE)).status_code == 204
+    assert client.get("/documents", headers=hdr(client, ALICE)).json() == []
+    assert client.get(f"/chunks/{cid}", headers=hdr(client, ALICE)).status_code == 404
     assert chunk_ids(store, ALICE) == []
     assert SHARED_ID in store.chunks  # shared chunks are untouched
-    assert client.delete(f"/documents/{doc['id']}?owner_id={ALICE}").status_code == 404
+    assert client.delete(f"/documents/{doc['id']}", headers=hdr(client, ALICE)).status_code == 404
 
 
-def test_chat_passes_the_owner_to_retrieval(store):
+def test_chat_passes_the_token_user_to_retrieval(store):
     retriever = FakeRetriever([make_hit(1)])
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, app_api_key=KEY)
+    a_session, b_session = uuid.uuid4(), uuid.uuid4()
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_retriever] = lambda: retriever
-    with TestClient(app, headers=AUTH) as c:
-        body = {"session_id": str(uuid.uuid4()), "message": "hi"}
-        c.post("/chat", json={**body, "owner_id": str(ALICE)})
-        c.post("/chat", json=body)
-    assert retriever.owners == [ALICE, None]
+    alice = login(store, ALICE, sessions=[a_session])
+    bob = login(store, BOB, sessions=[b_session])
+    with TestClient(app) as c:
+        c.post("/chat", json={"session_id": str(a_session), "message": "hi"}, headers=alice)
+        c.post("/chat", json={"session_id": str(b_session), "message": "hi"}, headers=bob)
+        # An `owner_id` in the body is no longer part of the API.
+        extra = {"session_id": str(a_session), "message": "hi", "owner_id": str(uuid.uuid4())}
+        refused = c.post("/chat", json=extra, headers=alice)
+    assert retriever.owners == [user_id(store, ALICE), user_id(store, BOB)]
+    assert refused.status_code == 422
 
 
 def test_retrieval_query_filters_by_owner(monkeypatch):
@@ -230,28 +243,22 @@ def test_document_count_limit_is_per_owner(make_client):
         assert refused.status_code == 409
         assert upload(c, owner=BOB, name="1.md").status_code == 201  # Bob has his own quota
         # Deleting one frees a slot.
-        first = c.get(f"/documents?owner_id={ALICE}").json()[0]["id"]
-        c.delete(f"/documents/{first}?owner_id={ALICE}")
+        first = c.get("/documents", headers=hdr(c, ALICE)).json()[0]["id"]
+        c.delete(f"/documents/{first}", headers=hdr(c, ALICE))
         assert upload(c, name="3.md").status_code == 201
 
 
-def test_endpoints_need_the_key_and_an_owner(client):
+def test_endpoints_need_a_token(client):
     files = {"file": ("a.md", MD)}
-    assert (
-        client.post(
-            "/documents", data={"owner_id": str(ALICE)}, files=files, headers={"X-API-Key": "x"}
-        ).status_code
-        == 401
-    )
-    assert client.get(f"/documents?owner_id={ALICE}", headers={"X-API-Key": "x"}).status_code == 401
-    assert (
-        client.delete(f"/documents/1?owner_id={ALICE}", headers={"X-API-Key": "x"}).status_code
-        == 401
-    )
-    assert client.post("/documents", files=files).status_code == 422  # no owner_id
-    assert client.get("/documents").status_code == 422
-    assert client.delete("/documents/1").status_code == 422
-    assert client.get("/documents?owner_id=not-a-uuid").status_code == 422
+    bad = {"Authorization": "Bearer nope"}
+    assert client.post("/documents", files=files).status_code == 401
+    assert client.post("/documents", files=files, headers=bad).status_code == 401
+    assert client.get("/documents").status_code == 401
+    assert client.get("/documents", headers=bad).status_code == 401
+    assert client.delete("/documents/1").status_code == 401
+    assert client.get("/chunks/1").status_code == 401
+    # The old API-key header opens nothing.
+    assert client.get("/documents", headers={"X-API-Key": "x"}).status_code == 401
 
 
 def test_uploads_share_the_per_ip_rate_limit(make_client):

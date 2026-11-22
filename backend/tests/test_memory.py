@@ -9,7 +9,7 @@ from mnemonic.main import app, get_provider, get_retriever, get_store
 from mnemonic.rag import select_history
 from mnemonic.store import StoredMessage
 
-from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, RecordingProvider, make_hit
+from .fakes import FakeRetriever, MemoryStore, RecordingProvider, login, make_hit, user_id
 
 SESSION = uuid.UUID("22222222-2222-2222-2222-222222222222")
 
@@ -52,12 +52,12 @@ def setup():
         FakeRetriever([make_hit(1)]),
     )
     app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, app_api_key=KEY, similarity_threshold=0.5, history_messages=6
+        _env_file=None, similarity_threshold=0.5, history_messages=6
     )
     app.dependency_overrides[get_retriever] = lambda: retriever
     app.dependency_overrides[get_provider] = lambda: provider
     app.dependency_overrides[get_store] = lambda: store
-    with TestClient(app, headers=AUTH) as client:
+    with TestClient(app, headers=login(store, sessions=[SESSION])) as client:
         yield client, store, provider, retriever
     app.dependency_overrides.clear()
 
@@ -65,9 +65,9 @@ def setup():
 def test_chat_prompt_contains_last_pairs_and_current_question(setup):
     client, store, provider, retriever = setup
     for i in range(1, 6):  # 5 complete pairs: only the last 3 may reach the prompt
-        store.add_message(SESSION, "user", f"q{i}")
-        store.add_message(SESSION, "assistant", f"a{i}")
-    store.add_message(SESSION, "user", "unanswered")  # trailing: ignored
+        store.add_message(user_id(store), SESSION, "user", f"q{i}")
+        store.add_message(user_id(store), SESSION, "assistant", f"a{i}")
+    store.add_message(user_id(store), SESSION, "user", "unanswered")  # trailing: ignored
 
     response = client.post("/chat", json={"session_id": str(SESSION), "message": "now"})
     assert response.status_code == 200

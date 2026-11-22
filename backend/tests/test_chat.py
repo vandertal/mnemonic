@@ -12,7 +12,7 @@ from mnemonic.main import app, get_provider, get_retriever, get_store
 from mnemonic.rag import REFUSAL
 from mnemonic.schemas import Message
 
-from .fakes import AUTH, KEY, FakeRetriever, MemoryStore, RecordingProvider, make_hit
+from .fakes import FakeRetriever, MemoryStore, RecordingProvider, login, make_hit
 
 SESSION = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
@@ -57,11 +57,11 @@ def store():
 @pytest.fixture
 def client(store):
     app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, app_api_key=KEY, llm_timeout_seconds=0.2, similarity_threshold=0.5
+        _env_file=None, llm_timeout_seconds=0.2, similarity_threshold=0.5
     )
     app.dependency_overrides[get_retriever] = lambda: FakeRetriever([make_hit(1)])
     app.dependency_overrides[get_store] = lambda: store
-    with TestClient(app, headers=AUTH) as c:
+    with TestClient(app, headers=login(store, sessions=[SESSION])) as c:
         yield c
     app.dependency_overrides.clear()
 
@@ -144,15 +144,16 @@ def test_chat_rejects_invalid_body(client, body):
 # --- RAG: retrieval, threshold, citations, system-prompt safety ---------------------------
 
 
-def rag_client(hits, answer="ok", threshold=0.5):
+def rag_client(hits, answer="ok", threshold=0.5, store=None):
     retriever, provider = FakeRetriever(hits), RecordingProvider(answer)
-    app.dependency_overrides[get_store] = MemoryStore
+    store = store or MemoryStore()
+    app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_settings] = lambda: Settings(
-        _env_file=None, app_api_key=KEY, similarity_threshold=threshold
+        _env_file=None, similarity_threshold=threshold
     )
     app.dependency_overrides[get_retriever] = lambda: retriever
     app.dependency_overrides[get_provider] = lambda: provider
-    return TestClient(app, headers=AUTH), retriever, provider
+    return TestClient(app, headers=login(store, sessions=[SESSION])), retriever, provider
 
 
 def ask(client, text="How do I use Query?"):
@@ -224,8 +225,7 @@ def test_chat_saves_both_messages_with_sources(client, store):
 
 
 def test_refusal_is_saved_too(store):
-    client, _, _ = rag_client([make_hit(1, similarity=0.1)])
-    app.dependency_overrides[get_store] = lambda: store
+    client, _, _ = rag_client([make_hit(1, similarity=0.1)], store=store)
     ask(client)
 
     assert [(m.role, m.content) for m in store.messages[SESSION]] == [
@@ -253,10 +253,6 @@ def test_history_endpoint_returns_messages_in_order(client, store):
     ]
 
 
-def test_history_of_unknown_session_is_empty_and_ids_are_validated(client):
-    assert client.get(f"/sessions/{uuid.uuid4()}/messages").json() == []
+def test_history_of_unknown_session_is_404_and_ids_are_validated(client):
+    assert client.get(f"/sessions/{uuid.uuid4()}/messages").status_code == 404
     assert client.get("/sessions/nope/messages").status_code == 422
-
-
-def test_schema_is_created_at_startup(client, store):
-    assert store.schema_initialized

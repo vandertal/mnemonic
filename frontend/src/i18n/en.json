@@ -13,17 +13,33 @@
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar"
   },
-  "access": {
-    "title": "Enter your access code",
-    "description": "Mnemonic is in a closed preview. Paste the access code you were given.",
-    "label": "Access code",
-    "placeholder": "Paste your code",
-    "submit": "Continue",
-    "required": "Enter the access code",
-    "tooLong": "That code is too long",
-    "wrong": "This code was not accepted. Check it and try again.",
-    "unreachable": "Can't reach the server, so the code could not be checked. Check your connection and press Continue to retry.",
-    "checking": "Checking…"
+  "auth": {
+    "loginTitle": "Sign in",
+    "loginText": "Welcome back. Sign in to your Mnemonic account.",
+    "registerTitle": "Create an account",
+    "registerText": "Your chats and documents are private to your account.",
+    "email": "Email",
+    "password": "Password",
+    "invite": "Invitation code (optional)",
+    "invitePlaceholder": "Only if you were given one",
+    "signIn": "Sign in",
+    "signingIn": "Signing in…",
+    "signUp": "Create one",
+    "signUpButton": "Create account",
+    "signingUp": "Creating account…",
+    "noAccount": "No account yet?",
+    "haveAccount": "Already have an account?",
+    "emailRequired": "Enter your email",
+    "emailInvalid": "That doesn't look like an email address",
+    "passwordShort": "Use at least 8 characters",
+    "passwordLong": "Use at most 128 characters",
+    "inviteLong": "That code is too long",
+    "wrongCredentials": "Wrong email or password.",
+    "badInvite": "This invitation code was not accepted.",
+    "emailTaken": "This email is already registered. Try signing in.",
+    "tooMany": "Too many attempts. Wait a minute and try again.",
+    "sessionExpired": "Your session has ended. Please sign in again.",
+    "checkFailed": "Couldn't check your session. Check your connection and try again."
   },
   "chat": {
     "title": "What do you want to learn?",
@@ -50,7 +66,14 @@
       "What is dependency injection in FastAPI?",
       "How do I validate a request body with Pydantic?",
       "How much is 15% of 2480?"
-    ]
+    ],
+    "loadMore": "Load more",
+    "sessionsFailed": "Couldn't load your chats.",
+    "renameSession": "Chat name",
+    "renameSessionNamed": "Rename chat “{{title}}”",
+    "notFoundTitle": "Chat not found",
+    "notFoundText": "This chat doesn't exist or was deleted.",
+    "openLatest": "Back to my chats"
   },
   "source": {
     "open": "Open source {{n}}",
@@ -115,9 +138,16 @@
     "themeDark": "Dark",
     "themeSystem": "System",
     "language": "Language",
-    "access": "Access",
-    "accessText": "Your access code is stored in this browser. Signing out removes it.",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "account": "Account",
+    "signedInAs": "Signed in as",
+    "accountText": "Your chats and documents are stored on the server. Flashcard decks stay in this browser.",
+    "deleteAccount": "Delete account",
+    "deleteTitle": "Delete your account?",
+    "deleteText": "Your account, chats and documents will be deleted for good, and so will the flashcard decks in this browser. This cannot be undone.",
+    "deleteConfirm": "Delete account",
+    "deleting": "Deleting…",
+    "deleted": "Account deleted"
   },
   "notFound": {
     "title": "Page not found",
@@ -127,9 +157,12 @@
   "errors": {
     "generic": "Something went wrong. Please try again.",
     "network": "Can't reach the server. Check your connection and try again.",
-    "auth": "The access code was not accepted. Please enter it again.",
+    "auth": "Your session has ended. Please sign in again.",
     "busy": "The service is busy right now. Try again in a minute.",
-    "server": "The server had a problem. Please try again."
+    "server": "The server had a problem. Please try again.",
+    "forbidden": "You don't have access to that.",
+    "conflict": "That already exists.",
+    "notFound": "Not found. It may have been deleted."
   },
   "common": {
     "cancel": "Cancel",

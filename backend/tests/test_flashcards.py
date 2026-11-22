@@ -9,7 +9,7 @@ from mnemonic.llm.fake import FakeProvider
 from mnemonic.main import app, get_provider, get_store
 from mnemonic.store import Chunk
 
-from .fakes import AUTH, KEY, MemoryStore
+from .fakes import MemoryStore, login, user_id
 
 SESSION = uuid.UUID("33333333-3333-3333-3333-333333333333")
 
@@ -27,19 +27,25 @@ def store():
     s = MemoryStore()
     s.chunks[1] = Chunk(1, "tutorial/cors.md", "CORS", "Use CORSMiddleware.")
     s.chunks[2] = Chunk(2, "tutorial/body.md", "Body", "Use a Pydantic model.")
-    s.add_message(SESSION, "user", "How do I enable CORS?")
+    login(s, sessions=[SESSION])  # Alice owns the session
+    alice = user_id(s)
+    s.add_message(alice, SESSION, "user", "How do I enable CORS?")
     s.add_message(  # id 2: an answer that cites chunks 1 and 2
-        SESSION, "assistant", "Use CORSMiddleware [1] with a model [2].", [{"id": 1}, {"id": 2}]
+        alice,
+        SESSION,
+        "assistant",
+        "Use CORSMiddleware [1] with a model [2].",
+        [{"id": 1}, {"id": 2}],
     )
-    s.add_message(SESSION, "assistant", "I don't know: nothing relevant.", [])  # id 3: no sources
+    s.add_message(alice, SESSION, "assistant", "I don't know: nothing relevant.", [])  # id 3
     return s
 
 
 def make_client(store: MemoryStore, provider: FakeProvider):
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, app_api_key=KEY)
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
     app.dependency_overrides[get_store] = lambda: store
     app.dependency_overrides[get_provider] = lambda: provider
-    return TestClient(app, headers=AUTH)
+    return TestClient(app, headers=login(store))
 
 
 def post(client, message_id: int = 2):
@@ -97,12 +103,12 @@ def test_unknown_message_is_404_and_answer_without_sources_is_422(store):
         assert post(client, message_id=3).status_code == 422
 
 
-def test_requires_the_api_key(store):
+def test_requires_a_token(store):
     with make_client(store, FakeProvider()) as client:
         response = client.post(
             "/flashcards",
             json={"session_id": str(SESSION), "message_id": 2},
-            headers={"X-API-Key": "wrong"},
+            headers={"Authorization": "Bearer nope"},
         )
     assert response.status_code == 401
 

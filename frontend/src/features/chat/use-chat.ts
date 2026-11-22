@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchHistory, streamChat } from '@/api/chat'
-import { isAbort } from '@/api/errors'
+import { NotFoundError, isAbort } from '@/api/errors'
 import type { Source, ToolEvent } from '@/api/types'
 import { describeError, toastError } from '@/lib/errors'
 
@@ -16,14 +16,25 @@ export interface ChatMessage {
   error?: string
 }
 
-type History = 'loading' | 'ready' | 'error'
+type History = 'loading' | 'ready' | 'error' | 'notFound'
+
+interface Callbacks {
+  /** After every answer attempt (finished, failed or stopped): the server may have set the title. */
+  onAnswered: () => void
+  /** The server says this session does not exist (deleted elsewhere, or not ours). */
+  onNotFound: () => void
+}
 
 /** One chat session. The page remounts it per session (key=), so no state leaks between chats. */
-export function useChat(sessionId: string, onAsk: (question: string) => void) {
+export function useChat(sessionId: string, callbacks: Callbacks) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [history, setHistory] = useState<History>('loading')
   const [busy, setBusy] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const cb = useRef(callbacks)
+  useEffect(() => {
+    cb.current = callbacks
+  })
 
   // The state starts as 'loading'; callers that retry set it themselves.
   const loadHistory = useCallback((signal?: AbortSignal) => {
@@ -44,6 +55,11 @@ export function useChat(sessionId: string, onAsk: (question: string) => void) {
       },
       (e) => {
         if (isAbort(e)) return
+        if (e instanceof NotFoundError) {
+          setHistory('notFound')
+          cb.current.onNotFound()
+          return
+        }
         setHistory('error')
         toastError(e)
       },
@@ -65,7 +81,6 @@ export function useChat(sessionId: string, onAsk: (question: string) => void) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setBusy(true)
-    onAsk(question)
 
     const id = crypto.randomUUID()
     const assistantKey = `a-${id}`
@@ -89,15 +104,19 @@ export function useChat(sessionId: string, onAsk: (question: string) => void) {
       patch((m) => (m.status === 'streaming' ? { ...m, status: 'done' } : m))
     } catch (e) {
       if (isAbort(e)) patch((m) => ({ ...m, status: 'stopped' }))
-      else {
+      else if (e instanceof NotFoundError) {
+        setHistory('notFound')
+        cb.current.onNotFound()
+      } else {
         patch((m) => ({ ...m, status: 'error', error: describeError(e) }))
         toastError(e)
       }
     } finally {
       abortRef.current = null
       setBusy(false)
+      cb.current.onAnswered()
     }
-  }, [sessionId, onAsk])
+  }, [sessionId])
 
   const reloadHistory = useCallback(() => {
     setHistory('loading')

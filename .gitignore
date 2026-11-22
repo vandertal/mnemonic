@@ -231,3 +231,13 @@ npm-debug.log*
 
 # Raw ingest data (cloned docs)
 backend/data/
+
+# Secrets: every .env variant (Vite reads .env.local, .env.production, ...), only examples tracked
+.env.*
+!.env.example
+*.pem
+
+# Model weights and exports (lab 33): never commit them
+*.onnx
+*.pt
+*.safetensors

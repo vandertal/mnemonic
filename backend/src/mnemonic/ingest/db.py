@@ -1,4 +1,4 @@
-"""Raw-SQL storage for chunks + vectors (psycopg, no ORM until lab 21)."""
+"""Raw-SQL storage for chunks + vectors (psycopg, no ORM). The schema lives in migrations/."""
 
 import hashlib
 from collections.abc import Iterable, Sequence
@@ -9,42 +9,6 @@ import psycopg
 from pgvector.psycopg import register_vector
 
 from mnemonic.ingest.chunker import Chunk
-from mnemonic.ingest.embedder import DIMENSIONS
-
-SCHEMA = f"""
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE IF NOT EXISTS chunks (
-    id           bigserial PRIMARY KEY,
-    file_path    text    NOT NULL,
-    heading      text    NOT NULL,
-    chunk_index  integer NOT NULL,
-    content      text    NOT NULL,
-    content_hash text    NOT NULL UNIQUE,
-    embedding    vector({DIMENSIONS}) NOT NULL
-);
-
--- HNSW with cosine distance: matches the `<=>` operator used in queries.
-CREATE INDEX IF NOT EXISTS chunks_embedding_idx
-    ON chunks USING hnsw (embedding vector_cosine_ops);
-
--- M7a: user uploads. Shared (FastAPI docs) chunks keep owner_id / document_id NULL.
--- No migrations yet (Alembic: lab 21), so the change is an idempotent ALTER.
-CREATE TABLE IF NOT EXISTS documents (
-    id         bigserial PRIMARY KEY,
-    owner_id   uuid NOT NULL,
-    filename   text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS documents_owner_idx ON documents (owner_id);
-
--- Deleting a document deletes its chunks (ON DELETE CASCADE).
-ALTER TABLE chunks ADD COLUMN IF NOT EXISTS document_id bigint
-    REFERENCES documents(id) ON DELETE CASCADE;
-ALTER TABLE chunks ADD COLUMN IF NOT EXISTS owner_id uuid;
-CREATE INDEX IF NOT EXISTS chunks_owner_idx ON chunks (owner_id);
-CREATE INDEX IF NOT EXISTS chunks_document_idx ON chunks (document_id);
-"""
 
 
 def content_hash(chunk: Chunk) -> str:
@@ -60,10 +24,6 @@ def connect(database_url: str) -> psycopg.Connection:
     conn.execute("CREATE EXTENSION IF NOT EXISTS vector")  # must exist before register_vector
     register_vector(conn)
     return conn
-
-
-def init_schema(conn: psycopg.Connection) -> None:
-    conn.execute(SCHEMA)
 
 
 def existing_hashes(conn: psycopg.Connection) -> set[str]:

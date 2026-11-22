@@ -1,0 +1,71 @@
+# Lint, type-check and test both halves on every push / PR to main and lab-21.
+# Render deploys `main` only after these checks pass (render.yaml: autoDeployTrigger: checksPass).
+# No secrets here: every value below is a dummy for a throwaway CI environment.
+name: CI
+
+on:
+  push:
+    branches: [main, lab-21]
+  pull_request:
+    branches: [main, lab-21]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: mnemonic
+          POSTGRES_PASSWORD: mnemonic
+          POSTGRES_DB: mnemonic_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mnemonic -d mnemonic_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # The integration tests wipe this database; it lives only inside this job.
+      TEST_DATABASE_URL: postgresql://mnemonic:mnemonic@localhost:5432/mnemonic_test
+      JWT_SECRET: ci-dummy-secret-not-used-anywhere-else-0123456789
+      LLM_PROVIDER: fake
+      # Fail instead of downloading an embedding model: tests must use fakes.
+      HF_HUB_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -ra
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npx oxlint
+      - run: npm run test
+      - run: npm run build
+        env:
+          VITE_API_URL: https://api.example.invalid

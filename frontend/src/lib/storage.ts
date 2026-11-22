@@ -1,9 +1,7 @@
 // All localStorage access in one place. Every call is wrapped: storage can throw
 // (private mode, blocked site data) and the app must still work without it.
 const KEYS = {
-  accessCode: 'mnemonic.accessCode',
-  sessionId: 'mnemonic.sessionId',
-  ownerId: 'mnemonic.ownerId',
+  token: 'mnemonic.token',
   theme: 'mnemonic.theme',
   lang: 'mnemonic.lang',
   sidebar: 'mnemonic.sidebarCollapsed',
@@ -51,15 +49,15 @@ export function writeJson(key: string, value: unknown): void {
   }
 }
 
-/** A random UUID kept in localStorage. NOT authentication: it only separates one browser's data from another's. */
-export function getOrCreateId(key: 'sessionId' | 'ownerId'): string {
-  const existing = readStored(key)
-  if (existing) return existing
-  const id = crypto.randomUUID()
-  writeStored(key, id)
-  return id
+export function removeJson(key: string): void {
+  try {
+    localStorage.removeItem(`mnemonic.${key}`)
+  } catch {
+    /* ignore */
+  }
 }
 
-export const getAccessCode = () => readStored('accessCode')
-export const setAccessCode = (code: string) => writeStored('accessCode', code)
-export const clearAccessCode = () => removeStored('accessCode')
+// The JWT. localStorage is readable by any script on the page (XSS): see frontend/README.md.
+export const getToken = () => readStored('token')
+export const setToken = (token: string) => writeStored('token', token)
+export const clearToken = () => removeStored('token')

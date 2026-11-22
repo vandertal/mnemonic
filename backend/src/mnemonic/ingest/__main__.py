@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import psycopg
+
 from mnemonic.config import get_settings
 from mnemonic.ingest import db
 from mnemonic.ingest.chunker import Chunk, chunk_markdown
@@ -42,8 +44,11 @@ def main() -> int:
     print(f"Chunked into {len(chunks)} chunks")
 
     with db.connect(get_settings().database_url) as conn:
-        db.init_schema(conn)
-        known = db.existing_hashes(conn)
+        try:
+            known = db.existing_hashes(conn)
+        except psycopg.errors.UndefinedTable:
+            print("The database has no tables yet. Run: uv run alembic upgrade head")
+            return 1
         # Embedding is the slow part: only embed chunks that are not stored yet.
         new = [c for c in chunks if db.content_hash(c) not in known]
         print(f"{len(new)} new, {len(chunks) - len(new)} already stored")

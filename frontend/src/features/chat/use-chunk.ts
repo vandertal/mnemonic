@@ -5,6 +5,9 @@ import type { Chunk } from '@/api/types'
 // One request per chunk: the card (snippet) and the dialog (full text) share the same promise.
 const cache = new Map<number, Promise<Chunk>>()
 
+/** Called on login/logout: a chunk one account could read must not be served to the next. */
+export const clearChunkCache = () => cache.clear()
+
 function load(id: number): Promise<Chunk> {
   let p = cache.get(id)
   if (!p) {
