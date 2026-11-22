@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { deleteDeck, loadDecks, type Deck } from '@/features/flashcards/decks'
 import { Review } from '@/features/flashcards/review'
+import { useCurrentUser } from '@/lib/auth'
 
 const PAGE_SIZE = 6
 
@@ -49,7 +50,8 @@ function DeckView({ deck, onBack, onDelete }: { deck: Deck; onBack: () => void; 
 
 export default function FlashcardsPage() {
   const { t, i18n } = useTranslation()
-  const [decks, setDecks] = useState(loadDecks) // read once per visit: decks are created on the chat page
+  const user = useCurrentUser()
+  const [decks, setDecks] = useState(() => loadDecks(user.id)) // read once per visit: decks are created on the chat page
   const [shown, setShown] = useState(PAGE_SIZE)
   const [openId, setOpenId] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
@@ -106,8 +108,8 @@ export default function FlashcardsPage() {
         confirmLabel={t('flashcards.deleteDeck')}
         onCancel={() => setConfirm(false)}
         onConfirm={() => {
-          if (openId) deleteDeck(openId)
-          setDecks(loadDecks())
+          if (openId) deleteDeck(user.id, openId)
+          setDecks(loadDecks(user.id))
           setOpenId(null)
           setConfirm(false)
         }}

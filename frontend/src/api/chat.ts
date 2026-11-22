@@ -1,5 +1,4 @@
-import { getOrCreateId } from '@/lib/storage'
-import { apiFetch, apiJson } from './client'
+import { apiFetch, apiJson, jsonBody } from './client'
 import { parseSse } from './sse'
 import type { ChatEvent, Chunk, FlashcardSet, Source, StoredMessage, ToolEvent } from './types'
 
@@ -10,13 +9,7 @@ export async function* streamChat(
   signal: AbortSignal,
 ): AsyncGenerator<ChatEvent> {
   const res = await apiFetch('/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: sessionId,
-      owner_id: getOrCreateId('ownerId'),
-      message,
-    }),
+    ...jsonBody({ session_id: sessionId, message }),
     signal,
   })
   if (!res.body) throw new Error('The response has no body')
@@ -47,11 +40,7 @@ export const fetchHistory = (sessionId: string, signal?: AbortSignal) =>
   apiJson<StoredMessage[]>(`/sessions/${sessionId}/messages`, { signal })
 
 export const fetchChunk = (id: number) =>
-  apiJson<Chunk>(`/chunks/${id}?owner_id=${getOrCreateId('ownerId')}`)
+  apiJson<Chunk>(`/chunks/${id}`)
 
 export const createFlashcards = (sessionId: string, messageId: number) =>
-  apiJson<FlashcardSet>('/flashcards', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, message_id: messageId, owner_id: getOrCreateId('ownerId') }),
-  })
+  apiJson<FlashcardSet>('/flashcards', jsonBody({ session_id: sessionId, message_id: messageId }))

@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 
 const TITLE_KEYS: Record<string, string> = {
-  '/access': 'access.title',
+  '/login': 'auth.loginTitle',
+  '/register': 'auth.registerTitle',
   '/chat': 'nav.chat',
   '/documents': 'nav.documents',
   '/flashcards': 'nav.flashcards',
@@ -15,7 +16,8 @@ export function usePageTitle() {
   const { t, i18n } = useTranslation()
   const { pathname } = useLocation()
   useEffect(() => {
-    const key = TITLE_KEYS[pathname] ?? (pathname === '/' ? 'nav.chat' : 'notFound.title')
+    const section = pathname.startsWith('/chat/') ? '/chat' : pathname
+    const key = TITLE_KEYS[section] ?? (pathname === '/' ? 'nav.chat' : 'notFound.title')
     document.title = `${t(key)} · ${t('app.name')}`
   }, [pathname, t, i18n.language])
 }

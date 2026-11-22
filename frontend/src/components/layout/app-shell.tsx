@@ -6,20 +6,28 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   Settings,
   Trash2,
 } from 'lucide-react'
-import { Suspense, useState } from 'react'
+import { Suspense, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom'
 import { PageFallback } from '@/components/page-fallback'
 import { OfflineBanner } from '@/components/offline-banner'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { useSessions } from '@/lib/sessions'
+import {
+  DEFAULT_TITLE,
+  useCreateSession,
+  useDeleteSession,
+  useRenameSession,
+  useSessions,
+} from '@/features/sessions/use-sessions'
 import { readStored, writeStored } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
@@ -42,51 +50,136 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
   )
 }
 
-function SessionList({ onNavigate }: { onNavigate?: () => void }) {
+/** The server's placeholder title is shown translated; real titles are shown as they are. */
+const displayTitle = (title: string, t: (k: string) => string) => (title === DEFAULT_TITLE ? t('chat.newChat') : title)
+
+function SessionRow({ id, title, active, onNavigate }: { id: string; title: string; active: boolean; onNavigate?: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { sessions, activeId, select, remove } = useSessions()
+  const rename = useRenameSession()
+  const remove = useDeleteSession()
+  const [editing, setEditing] = useState(false)
+  const shown = displayTitle(title, t)
+
+  const commit = (value: string) => {
+    setEditing(false)
+    const next = value.trim().slice(0, 100)
+    if (next && next !== shown) rename.mutate({ id, title: next })
+  }
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') commit(e.currentTarget.value)
+    else if (e.key === 'Escape') setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <li className="px-1">
+        <input
+          autoFocus
+          defaultValue={shown}
+          maxLength={100}
+          aria-label={t('chat.renameSession')}
+          onKeyDown={onKey}
+          onBlur={(e) => commit(e.currentTarget.value)}
+          className="h-8 w-full rounded-md border border-input bg-card px-2 text-sm"
+        />
+      </li>
+    )
+  }
   return (
-    <ul className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2" aria-label={t('chat.sessions')}>
-      {sessions.map((s) => (
-        <li key={s.id} className="group relative">
-          <button
-            type="button"
-            onClick={() => {
-              select(s.id)
-              navigate('/chat')
-              onNavigate?.()
-            }}
-            aria-current={s.id === activeId ? 'true' : undefined}
-            className={cn(
-              'flex h-8 w-full cursor-pointer items-center rounded-md pr-8 pl-3 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-              s.id === activeId && 'bg-accent-soft font-medium text-foreground',
-            )}
-          >
-            <span className="truncate">{s.title || t('chat.newChat')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => remove(s.id)}
-            aria-label={t('chat.deleteSession', { title: s.title || t('chat.newChat') })}
-            className="absolute top-1 right-1 grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-background hover:text-destructive focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-        </li>
-      ))}
-    </ul>
+    <li className="group relative">
+      <button
+        type="button"
+        onClick={() => {
+          navigate(`/chat/${id}`)
+          onNavigate?.()
+        }}
+        onDoubleClick={() => setEditing(true)}
+        aria-current={active ? 'true' : undefined}
+        className={cn(
+          'flex h-8 w-full cursor-pointer items-center rounded-md pr-14 pl-3 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+          active && 'bg-accent-soft font-medium text-foreground',
+        )}
+      >
+        <span className="truncate">{shown}</span>
+      </button>
+      <div className="absolute top-1 right-1 flex focus-within:opacity-100 md:opacity-0 md:group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          aria-label={t('chat.renameSessionNamed', { title: shown })}
+          className="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
+        >
+          <Pencil className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            remove.mutate(id)
+            if (active) navigate('/chat')
+          }}
+          aria-label={t('chat.deleteSession', { title: shown })}
+          className="grid size-6 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-background hover:text-destructive"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+    </li>
+  )
+}
+
+function SessionList({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useTranslation()
+  const activeId = useMatch('/chat/:sessionId')?.params.sessionId
+  const { sessions, isPending, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useSessions()
+
+  if (isPending) {
+    return (
+      <div className="space-y-1.5 px-3 py-1" role="status" aria-label={t('common.loading')}>
+        <Skeleton className="h-6 w-full" />
+        <Skeleton className="h-6 w-5/6" />
+        <Skeleton className="h-6 w-2/3" />
+      </div>
+    )
+  }
+  if (isError) {
+    return (
+      <div className="flex flex-col items-start gap-2 px-3 py-1 text-sm text-muted-foreground">
+        {t('chat.sessionsFailed')}
+        <Button variant="outline" size="sm" onClick={() => void refetch()}>
+          {t('chat.retry')}
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2">
+      <ul className="flex flex-col gap-0.5" aria-label={t('chat.sessions')}>
+        {sessions.map((s) => (
+          <SessionRow key={s.id} id={s.id} title={s.title} active={s.id === activeId} onNavigate={onNavigate} />
+        ))}
+      </ul>
+      {hasNextPage && (
+        <Button variant="ghost" size="sm" className="mt-1" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          {isFetchingNextPage ? t('common.loading') : t('chat.loadMore')}
+        </Button>
+      )}
+    </div>
   )
 }
 
 function SidebarBody({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { newChat } = useSessions()
+  const activeId = useMatch('/chat/:sessionId')?.params.sessionId
+  const { sessions } = useSessions()
+  const create = useCreateSession()
   const startChat = () => {
-    newChat()
-    navigate('/chat')
     onNavigate?.()
+    // An untouched chat is already a "new chat": open it instead of piling up blank ones.
+    const blank = sessions.find((s) => s.id === activeId && s.title === DEFAULT_TITLE)
+    if (blank) return navigate(`/chat/${blank.id}`)
+    create.mutate(undefined, { onSuccess: (created) => navigate(`/chat/${created.id}`) })
   }
   return (
     <>
@@ -97,6 +190,7 @@ function SidebarBody({ collapsed, onNavigate }: { collapsed?: boolean; onNavigat
           size={collapsed ? 'icon' : 'default'}
           className={cn(!collapsed && 'w-full justify-start')}
           onClick={startChat}
+          disabled={create.isPending}
           title={collapsed ? t('chat.newChat') : undefined}
           aria-label={t('chat.newChat')}
         >

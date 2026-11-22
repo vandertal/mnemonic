@@ -50,3 +50,25 @@ export interface Flashcard {
 export interface FlashcardSet {
   cards: Flashcard[]
 }
+
+export interface User {
+  id: string
+  email: string
+  created_at: string
+}
+
+export interface ChatSession {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+/** Offset pagination: `next` is the offset of the following page, null on the last one. */
+export interface SessionPage {
+  items: ChatSession[]
+  total: number
+  limit: number
+  offset: number
+  next: number | null
+}

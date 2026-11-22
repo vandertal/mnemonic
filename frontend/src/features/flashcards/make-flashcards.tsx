@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { createFlashcards } from '@/api/chat'
 import { Button } from '@/components/ui/button'
+import { useCurrentUser } from '@/lib/auth'
 import { toastError } from '@/lib/errors'
 import { saveDeck } from './decks'
 
@@ -20,10 +21,11 @@ export function MakeFlashcardsButton({
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const user = useCurrentUser()
   const make = useMutation({
     mutationFn: () => createFlashcards(sessionId, messageId),
     onSuccess: (set) => {
-      saveDeck({ id: `${sessionId}:${messageId}`, question, createdAt: Date.now(), cards: set.cards })
+      saveDeck(user.id, { id: `${sessionId}:${messageId}`, question, createdAt: Date.now(), cards: set.cards })
       toast.success(t('flashcards.created', { count: set.cards.length }), {
         action: { label: t('flashcards.open'), onClick: () => navigate('/flashcards') },
       })
