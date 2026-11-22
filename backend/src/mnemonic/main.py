@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from functools import lru_cache
-from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
@@ -14,7 +13,7 @@ import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi import Path as PathParam
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from mnemonic.auth import get_current_user
 from mnemonic.config import Settings, get_settings
@@ -71,7 +70,6 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger(__name__)
 
 MIN_JWT_SECRET_LENGTH = 32
-STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -630,8 +628,9 @@ async def health() -> HealthOut:
 @app.get(
     "/",
     tags=["system"],
-    summary="Demo page",
-    description="A minimal static chat page.",
+    summary="API docs",
+    description="Redirects to the interactive API docs.",
+    include_in_schema=False,
 )
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+async def index() -> RedirectResponse:
+    return RedirectResponse("/docs")

@@ -21,7 +21,7 @@ AI study assistant: ask your documents, get flashcards from text and images
   question) for arithmetic over numbers in the context; the call is shown as a small line under the answer
   (`calculator: 3*12+2*7 = 50`). Parsed with `ast` (no `eval`), whitelisted operators only.
 - **Eval and benchmark** against a plain LLM: see below.
-- Sessions persist in Postgres, access code + per-IP and global rate limits, every LLM call is logged
+- Sessions persist in Postgres, accounts (argon2 + JWT), per-IP and global rate limits, every LLM call is logged
   (tokens, cost estimate).
 
 ## Known limitations
@@ -37,15 +37,11 @@ AI study assistant: ask your documents, get flashcards from text and images
 
 ## Access
 
-> **Limitation: "per user" is not real authentication.** Your documents belong to an `owner_id`, a random
-> UUID the browser generates and keeps in `localStorage` (like the session id). Anyone who knows that UUID
-> (and has the access code) can read and delete that space; clearing the browser data loses access to it.
-> Real accounts come in lab 21. Another owner's chunk answers 404 on `/chunks/{id}`, like a missing one.
-
-The service spends a small free-tier LLM quota, so it is closed behind an access code (`X-API-Key`).
-Codes are handed out **manually** by the author. The page asks for the code on the first visit and remembers
-it in the browser; a wrong code is erased and asked for again. Limits: 10 requests/min per IP and a
-service-wide LLM budget (`GLOBAL_RPM`, default 5/min) — over the limit the page shows "try again in N s".
+Real accounts: register with an email and a password (stored as an argon2id hash), log in, and the SPA sends a
+JWT as `Authorization: Bearer`. Every endpoint scopes its data to the user in the token; someone else's
+session, document or chunk answers 404. Registration may be closed behind an invitation code
+(`REGISTRATION_CODE`). Limits: 10 requests/min per IP, 5/min per IP on `/auth/*`, and a service-wide LLM
+budget (`GLOBAL_RPM`, default 5/min). Logout only forgets the token on the client (no server-side revocation).
 
 ## Run locally
 
@@ -67,7 +63,7 @@ Render asks for them in the dashboard.
    | `GEMINI_API_KEY` | key from Google AI Studio (server-side only) |
    | `GEMINI_MODEL` | e.g. `gemini-3.5-flash-lite` (empty = default) |
    | `DATABASE_URL` | Neon connection string (`...?sslmode=require`) |
-   | `APP_API_KEY` | the access code (the app refuses to start without it) |
+   | `JWT_SECRET` | signs the access tokens, at least 32 characters (the app refuses to start without it) |
 
    `FASTEMBED_CACHE_PATH` is already set in `render.yaml` (not a secret).
 4. Wait for the build, open the `onrender.com` URL, put it in the "Live demo" line above.
@@ -100,7 +96,7 @@ pauses between LLM calls so the service-wide `GLOBAL_RPM` budget is not exceeded
 `Retry-After` and retries once).
 
 ```powershell
-$env:APP_API_KEY = "<code>"; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
+$env:EVAL_EMAIL = "<email>"; $env:EVAL_PASSWORD = "<password>"; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
 python eval/run_eval.py     # standard library only; writes eval/results.md
 ```
 
@@ -138,7 +134,7 @@ Full table: [eval/results.md](eval/results.md).
 running server (RAG) and directly through the backend's provider with no retrieval and no system prompt (plain).
 
 ```powershell
-$env:APP_API_KEY = "<code>"; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
+$env:EVAL_EMAIL = "<email>"; $env:EVAL_PASSWORD = "<password>"; $env:BASE_URL = "http://localhost:8000"; $env:GLOBAL_RPM = "5"
 uv run --project backend python eval/run_benchmark.py     # writes eval/benchmark.md
 ```
 
