@@ -1,73 +1,294 @@
-# mnemonic
-AI study assistant: ask your documents, get flashcards from text and images
+# Mnemonic
 
-**Live demo:** <https://mnemonic-y1js.onrender.com> — the free tier sleeps after 15 minutes idle, the first request takes ~30–60 s.
+An AI study assistant with real accounts: ask questions over a knowledge base or your own uploaded notes,
+get answers that cite their sources (or an honest "I don't know"), and turn answers into flashcards.
+
+- **API (live):** TODO_LIVE_URL · **OpenAPI docs:** TODO_LIVE_URL/docs · health: TODO_LIVE_URL/health
+- **SPA (live):** see [frontend/README.md](frontend/README.md)
+- The API runs on Render's free plan: it sleeps after 15 minutes idle, so the first request can take ~30–60 s.
+
+[![CI](https://github.com/vandertal/mnemonic/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
 ## Features
 
-- **Questions over the FastAPI docs (RAG).** Answers stream in and cite their sources; an off-topic
-  question gets "I don't know" without calling the LLM.
-- **Clickable citations.** Click a source under an answer to read the exact chunk text
-  (`GET /chunks/{id}`).
-- **Conversation memory.** The last 3 question/answer pairs (`HISTORY_MESSAGES=6`) go into the prompt, so
-  "and what about X?" works. Retrieval still searches only by the *current* question, so a vague follow-up
-  such as "how do I make it optional?" can retrieve poorly.
-- **Flashcards.** "Make flashcards" under an answer turns it into 3–5 question/answer cards (click to flip).
-  The model returns JSON that is validated against a Pydantic schema (structured output); `POST /flashcards`.
-- **My documents.** Upload `.md`, `.txt` or text PDFs (<= 5 MB, <= 50 pages, <= 5 files per owner);
-  questions search the shared FastAPI docs plus your own files. `POST/GET /documents`,
-  `DELETE /documents/{id}`. Scanned (image-only) PDFs are rejected: no OCR yet.
-- **Calculator tool.** With Gemini the model can call a calculator (agentic loop, max 3 LLM calls per
-  question) for arithmetic over numbers in the context; the call is shown as a small line under the answer
-  (`calculator: 3*12+2*7 = 50`). Parsed with `ast` (no `eval`), whitelisted operators only.
-- **Eval and benchmark** against a plain LLM: see below.
-- Sessions persist in Postgres, accounts (argon2 + JWT), per-IP and global rate limits, every LLM call is logged
-  (tokens, cost estimate).
+- **Accounts.** Register with email + password (stored as an argon2id hash), log in for a 24 h JWT, send it as
+  `Authorization: Bearer`. Every data endpoint scopes rows to the user in the token; someone else's id answers 404.
+- **Chat sessions (the CRUD resource).** Create, list (paginated), get, rename, delete; chat history per session.
+- **Questions over documents (RAG).** Answers stream in (SSE) and cite their sources; an off-topic question gets
+  "I don't know" without calling the LLM. Click a citation to read the exact chunk (`GET /chunks/{id}`).
+- **My documents.** Upload `.md`, `.txt` or text PDFs (<= 5 MB, <= 50 pages, <= 5 files per account); questions
+  search the shared FastAPI docs plus your own files only.
+- **Flashcards.** An answer becomes 3–5 question/answer cards (structured LLM output validated by Pydantic).
+- **Calculator tool.** With Gemini the model can call a calculator (`ast`-parsed, no `eval`).
+- **Conversation memory:** the last 3 question/answer pairs go into the prompt.
 
-## Known limitations
+## Tech stack
 
-- **English-only embedder.** Russian worked on a 1-chunk document; large Russian corpora are unmeasured.
-- **Short queries may be refused** (one- or two-word questions score below the threshold; measured in
-  [lab-31](docs/labs/lab-31.md)). The refusal asks for a more specific question.
-- **Multipart is parsed before the key check** on `POST /documents`: the framework reads the form before our
-  dependencies run, so an unauthenticated client can make the server parse a small upload.
-- **The calculator only works after retrieval passes.** The "I don't know" gate runs before the LLM, so the
-  tool fires only for questions that already found relevant chunks (e.g. arithmetic over numbers in an uploaded
-  document). Tool calls are not stored in the history, only the final text.
+| Layer | Choice |
+|---|---|
+| API | Python 3.13, FastAPI 0.165, Pydantic 2.14, uvicorn 0.54, managed with `uv` |
+| Auth | pwdlib 0.4 (argon2id), PyJWT 2.15 (HS256) |
+| Database | PostgreSQL 17 + pgvector (Neon), psycopg 3.3 (raw SQL, no ORM), Alembic 1.20 migrations |
+| AI | fastembed 0.9 (`BAAI/bge-small-en-v1.5`, ONNX on CPU), Gemini via google-genai 3.6 (or a fake provider) |
+| SPA | React 19.3, TypeScript 7.0, Vite 8.3, TanStack Query 5, Tailwind 4, i18next (uk / en) |
+| Quality | ruff, pytest (unit + real-Postgres integration), vitest, oxlint, GitHub Actions |
+| Hosting | API on Render (free), SPA on Cloudflare, database on Neon |
 
-## Access
+## Architecture
 
-Real accounts: register with an email and a password (stored as an argon2id hash), log in, and the SPA sends a
-JWT as `Authorization: Bearer`. Every endpoint scopes its data to the user in the token; someone else's
-session, document or chunk answers 404. Registration may be closed behind an invitation code
-(`REGISTRATION_CODE`). Limits: 10 requests/min per IP, 5/min per IP on `/auth/*`, and a service-wide LLM
-budget (`GLOBAL_RPM`, default 5/min). Logout only forgets the token on the client (no server-side revocation).
+```mermaid
+flowchart LR
+  U["Browser"] -- "HTML/JS/CSS" --> CF["Cloudflare<br/>React SPA (static)"]
+  U -- "JSON / SSE<br/>Authorization: Bearer JWT" --> R["Render<br/>FastAPI (uvicorn)"]
+  R -- "SQL + vector search<br/>(psycopg, TLS)" --> N[("Neon<br/>Postgres + pgvector")]
+  R -- "prompt with retrieved chunks" --> G["Gemini API"]
+  GH["GitHub Actions CI"] -. "checks pass → deploy" .-> R
+```
+
+One request, end to end: the SPA sends `POST /sessions` with the Bearer token → FastAPI's `get_current_user`
+dependency verifies the JWT signature and expiry and loads the user → the route calls `PgStore.create_session`
+in a worker thread → one parameterised `INSERT ... RETURNING` → the row comes back as JSON with `201 Created`.
+
+## Database (ER diagram)
+
+```mermaid
+erDiagram
+  users ||--o{ sessions : owns
+  users ||--o{ documents : owns
+  users ||--o{ chunks : "owns (uploaded)"
+  sessions ||--o{ messages : has
+  sessions ||--o{ llm_calls : logs
+  documents ||--o{ chunks : "split into"
+
+  users {
+    uuid id PK
+    text email UK "lower-case (CHECK)"
+    text password_hash "argon2id"
+    timestamptz created_at
+  }
+  sessions {
+    uuid id PK
+    uuid user_id FK
+    text title
+    timestamptz created_at
+    timestamptz updated_at
+  }
+  messages {
+    bigint id PK
+    uuid session_id FK
+    text role "user | assistant"
+    text content
+    jsonb sources
+    timestamptz created_at
+  }
+  llm_calls {
+    bigint id PK
+    uuid session_id FK
+    text model
+    int tokens_in
+    int tokens_out
+    numeric cost_usd
+    int latency_ms
+    text status
+    timestamptz created_at
+  }
+  documents {
+    bigint id PK
+    uuid owner_id FK
+    text filename
+    timestamptz created_at
+  }
+  chunks {
+    bigint id PK
+    text file_path
+    text heading
+    int chunk_index
+    text content
+    text content_hash UK
+    vector embedding "384 dims, HNSW cosine index"
+    bigint document_id FK "NULL = shared knowledge base"
+    uuid owner_id FK "NULL = shared knowledge base"
+  }
+```
+
+All foreign keys are `ON DELETE CASCADE`: deleting an account (`DELETE /auth/me`) removes its sessions,
+messages, LLM call log, documents and chunks. Shared knowledge-base chunks (`owner_id IS NULL`) belong to nobody.
+The schema is owned by Alembic: [backend/migrations/versions/](backend/migrations/versions/) (raw SQL).
+
+## Try the API with curl
+
+Swagger UI at `/docs` has an **Authorize** button (username = email). From a terminal:
+
+**bash** (uses `jq`):
+
+```bash
+API=TODO_LIVE_URL
+
+# register (201), then log in with the OAuth2 password form (username = email)
+curl -s -X POST "$API/auth/register" -H "Content-Type: application/json" \
+  -d '{"email": "alice@example.com", "password": "correct horse battery"}'
+TOKEN=$(curl -s -X POST "$API/auth/login" \
+  --data-urlencode "username=alice@example.com" --data-urlencode "password=correct horse battery" \
+  | jq -r .access_token)
+AUTH="Authorization: Bearer $TOKEN"
+
+curl -i "$API/sessions"                                   # no token -> 401
+SID=$(curl -s -X POST "$API/sessions" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"title": "FastAPI basics"}' | jq -r .id)           # create -> 201
+curl -s "$API/sessions?limit=10&offset=0" -H "$AUTH"      # list -> {items, total, limit, offset, next}
+curl -s "$API/sessions/$SID" -H "$AUTH"                   # get
+curl -s -X PATCH "$API/sessions/$SID" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"title": "Dependency injection"}'                  # rename
+curl -i -X DELETE "$API/sessions/$SID" -H "$AUTH"         # delete -> 204
+```
+
+**PowerShell 7** (`curl.exe`, not the `curl` alias):
+
+```powershell
+$API = "TODO_LIVE_URL"
+
+curl.exe -s -X POST "$API/auth/register" -H "Content-Type: application/json" `
+  -d '{"email": "alice@example.com", "password": "correct horse battery"}'
+$TOKEN = (curl.exe -s -X POST "$API/auth/login" `
+  --data-urlencode "username=alice@example.com" --data-urlencode "password=correct horse battery" |
+  ConvertFrom-Json).access_token
+$AUTH = "Authorization: Bearer $TOKEN"
+
+curl.exe -i "$API/sessions"                                # no token -> 401
+$SID = (curl.exe -s -X POST "$API/sessions" -H $AUTH -H "Content-Type: application/json" `
+  -d '{"title": "FastAPI basics"}' | ConvertFrom-Json).id  # create -> 201
+curl.exe -s "$API/sessions?limit=10&offset=0" -H $AUTH     # list
+curl.exe -s "$API/sessions/$SID" -H $AUTH                  # get
+curl.exe -s -X PATCH "$API/sessions/$SID" -H $AUTH -H "Content-Type: application/json" `
+  -d '{"title": "Dependency injection"}'                   # rename
+curl.exe -i -X DELETE "$API/sessions/$SID" -H $AUTH        # delete -> 204
+```
+
+All endpoints: [backend/README.md](backend/README.md#endpoints).
+
+### Status codes
+
+| Code | When |
+|---|---|
+| 200 | read / update / login succeeded |
+| 201 | created: account, session, document |
+| 204 | deleted: session, document, account |
+| 401 | no token, bad / expired token, or wrong email / password (same answer for both: no user enumeration) |
+| 403 | wrong or missing registration code (only if `REGISTRATION_CODE` is set) |
+| 404 | does not exist **or is someone else's** (403 would confirm that the id exists) |
+| 409 | email already registered; document limit reached |
+| 413 | upload too large |
+| 422 | validation error (Pydantic): bad email, short password, unsupported file, ... |
+| 429 | rate limit (per IP, stricter on `/auth/*`, or the service-wide LLM budget); see `Retry-After` |
+| 502 | the LLM failed or returned an invalid format (`/flashcards`) |
 
 ## Run locally
 
-See [backend/README.md](backend/README.md) and [docs/SETUP.md](docs/SETUP.md). Copy `backend/.env.example`
-to `backend/.env` and fill it in (never commit `.env`).
+Needs Python 3.13 + [uv](https://docs.astral.sh/uv/), Node 22, and a Postgres with pgvector (a free Neon branch
+works). Details: [docs/SETUP.md](docs/SETUP.md).
 
-## Deploy (Render, free tier)
+```powershell
+# backend
+cd backend
+Copy-Item .env.example .env        # fill in DATABASE_URL and JWT_SECRET (LLM_PROVIDER=fake needs no key)
+uv sync
+uv run alembic upgrade head        # build the schema
+uv run python -m mnemonic.ingest   # optional: the shared FastAPI-docs knowledge base
+uv run fastapi dev src/mnemonic/main.py   # http://127.0.0.1:8000/docs
 
-The service is described in [render.yaml](render.yaml) (a Render Blueprint). Secrets are never in the repo —
-Render asks for them in the dashboard.
+# frontend (second terminal)
+cd frontend
+Copy-Item .env.example .env        # VITE_API_URL = the backend above or the deployed one
+npm ci
+npm run dev                        # checks VITE_API_URL first (same as `npm run doctor`)
+```
 
-1. Push the repo to GitHub. Make sure the database is ingested (`uv run python -m mnemonic.ingest` locally).
-2. Render dashboard → **New +** → **Blueprint** → pick this repo → **Apply**.
-3. Fill in the environment variables when asked (or later: service → **Environment**):
+Every variable is documented in [backend/.env.example](backend/.env.example) (no real values in the repo).
+`JWT_SECRET` must be at least 32 characters: `uv run python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+
+Tests: `uv run pytest` (unit; integration tests skip themselves) and, against a **throwaway** database,
+`$env:TEST_DATABASE_URL = "postgresql://..."; uv run pytest -m integration` (see [backend/README.md](backend/README.md#tests)).
+
+## Deploy
+
+**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push / PR to `main` and `lab-21`:
+
+- `backend`: a `pgvector/pgvector:pg17` service container, `uv sync`, `ruff check`, `ruff format --check`,
+  `pytest` (unit + integration on that real database; fake LLM, no model download, dummy `JWT_SECRET`).
+- `frontend`: `npm ci`, `tsc -b`, `oxlint`, `npm run test` (vitest), `npm run build`.
+
+**CD**: the API is a Render Blueprint ([render.yaml](render.yaml)) with `autoDeployTrigger: checksPass`: a commit
+on `main` deploys only after its CI checks pass, so a red test blocks the deploy.
+
+1. Render dashboard → **New +** → **Blueprint** → this repo (or, for an existing service, set
+   **Settings → Auto-Deploy → After CI checks pass**).
+2. Environment variables (service → **Environment**; never in the repo):
 
    | Variable | Value |
    |---|---|
-   | `LLM_PROVIDER` | `gemini` |
-   | `GEMINI_API_KEY` | key from Google AI Studio (server-side only) |
-   | `GEMINI_MODEL` | e.g. `gemini-3.5-flash-lite` (empty = default) |
    | `DATABASE_URL` | Neon connection string (`...?sslmode=require`) |
-   | `JWT_SECRET` | signs the access tokens, at least 32 characters (the app refuses to start without it) |
+   | `JWT_SECRET` | signs the tokens, >= 32 random characters; the app refuses to start without it |
+   | `REGISTRATION_CODE` | optional: an invitation code; empty = open registration |
+   | `LLM_PROVIDER` / `GEMINI_API_KEY` / `GEMINI_MODEL` | `gemini`, the key (server-side only), model name |
+   | `CORS_ORIGINS` | the SPA's URL, e.g. `https://<your-spa>.workers.dev` |
 
-   `FASTEMBED_CACHE_PATH` is already set in `render.yaml` (not a secret).
-4. Wait for the build, open the `onrender.com` URL, put it in the "Live demo" line above.
-5. Check **Logs**: the startup line `LLM provider: gemini (model: ...)` shows what runs live (the key is never logged).
+   Render asks for `sync: false` variables only when a Blueprint is first created; on an existing one add new
+   keys (e.g. `JWT_SECRET`) by hand.
+3. Migrations: the start command runs `alembic upgrade head` before uvicorn, so a deploy applies new revisions
+   first; if one fails, the new instance never becomes healthy and Render keeps the old one live.
+4. Health check: `GET /health` (no auth, no database).
+5. SPA: see [frontend/README.md](frontend/README.md) (Cloudflare; `VITE_API_URL` at build time).
+
+## Side quests done
+
+- **Rate limiting**: per-IP sliding window (10/min), stricter on `/auth/*` (5/min), and a service-wide LLM budget;
+  `429` + `Retry-After`.
+- **Pagination**: `GET /sessions?limit=&offset=` with `total` and `next`, stable order (`updated_at DESC, id`).
+- **Structured JSON logs**: one line per request (method, route template, status, duration, user id, ip; never
+  headers, bodies or tokens).
+- **Automated tests**: ~190 unit tests (fakes, no DB), integration tests on real Postgres + pgvector (migrations up/down,
+  races, cascades, ownership, one HTTP flow), vitest for the SSE parser.
+- **CI/CD**: GitHub Actions on every push / PR; Render deploys only after checks pass.
+- Extension: a React SPA with login / register, server-side chat sessions, uk / en ([frontend/](frontend/)).
+
+## Deployment checklist (lab 21 brief)
+
+- [ ] API live at a public URL — the lab-21 code is not deployed yet (`TODO_LIVE_URL`).
+- [x] OpenAPI / Swagger UI at `/docs` (in code; live once deployed).
+- [x] `curl` examples in this README, including auth.
+- [x] Secrets (DB URL, JWT secret) only in environment variables, not in code.
+- [x] `.env` (every variant) is in `.gitignore`; the git history was searched for secrets: none found.
+- [x] Passwords hashed with argon2id.
+- [x] Wrong password returns 401 (tested).
+- [x] A request to a protected endpoint without a token returns 401 (a test walks every route).
+- [ ] One user can't access another user's data — covered by tests and `scripts/ownership_smoke.py` on the
+  dev database; to verify manually on the live URL after the deploy.
+- [x] JSON responses with `Content-Type: application/json`.
+- [x] CORS configured: an explicit list of SPA origins (`CORS_ORIGINS`), no credentials.
+- [ ] The deployed `/health` returns 200 — after the deploy.
+
+## Known limitations
+
+- **No refresh token and no revocation.** A token is valid for 24 h; logout only forgets it on the client. A stolen
+  token works until it expires (deleting the account does stop it: the user is looked up on every request).
+- **The token lives in localStorage**: readable by any script on the SPA's page if there is ever an XSS bug.
+  An HttpOnly cookie was rejected: the SPA and the API are different origins (SameSite / CSRF complexity).
+- **Rate limiters are in memory**: they reset on every restart / deploy and are per instance (two instances = double
+  the limit). Fine for one free instance; Redis would be the fix.
+- **Register answers 409 for a taken email**, so someone can check whether an email has an account (login does not
+  leak this: same 401 and a dummy hash for unknown emails).
+- **Registration is open** unless `REGISTRATION_CODE` is set; the per-IP limit is the only other brake.
+- **Flashcard decks are stored in the browser only** (localStorage, per user): not synced between devices.
+- **Render free plan cold start**: ~30–60 s for the first request after 15 minutes idle.
+- **Multipart is parsed before the auth check** on `POST /documents` (the framework reads the form first).
+- **English-only embedder**; short one- or two-word questions may fall under the similarity threshold.
+- **The calculator only works after retrieval passes** (the "I don't know" gate runs first).
+
+## Team
+
+Solo project (42-Lab program).
+
+## Deploy notes: memory and the embedding model
 
 ### Memory (free tier = 512 MB)
 

@@ -1,12 +1,42 @@
 # Mnemonic backend
 
-FastAPI app. See the repository root `CLAUDE.md` and `docs/` for the full picture.
+FastAPI app: accounts (argon2id + JWT), chat sessions, RAG over pgvector, documents, flashcards.
+Project overview, architecture, ER diagram, curl examples and limitations: [../README.md](../README.md).
 
 ```powershell
-uv run fastapi dev src/mnemonic/main.py
-uv run pytest
+Copy-Item .env.example .env       # fill in DATABASE_URL and JWT_SECRET
+uv sync
+uv run alembic upgrade head
+uv run fastapi dev src/mnemonic/main.py   # http://127.0.0.1:8000/docs
 uv run ruff check . ; uv run ruff format .
 ```
+
+## Tests
+
+```powershell
+uv run pytest                     # unit tests (fakes, no database); integration tests are skipped
+uv run pytest -m integration      # only the integration tests (needs TEST_DATABASE_URL, below)
+```
+
+Integration tests (`tests/integration/`) run against a **real Postgres + pgvector**: the real migrations, the real
+`PgStore`, real constraints and locks. They run only when `TEST_DATABASE_URL` is set, and they **wipe that
+database** (drop the `public` schema, then `alembic upgrade head`; tables are truncated between tests). They
+refuse to start if `TEST_DATABASE_URL` points at the same server + database as `DATABASE_URL`.
+
+```powershell
+# a throwaway local database (Docker), or a separate Neon branch
+docker run -d --name mnemonic-test -e POSTGRES_PASSWORD=test -p 5433:5432 pgvector/pgvector:pg17
+$env:TEST_DATABASE_URL = "postgresql://postgres:test@localhost:5433/postgres"
+uv run pytest
+```
+
+What they cover: migrations up → down → up; two parallel registrations of one email (exactly one wins);
+sessions ownership and stable pagination; the document limit under parallel uploads (advisory lock); account
+deletion cascades; chunk visibility (shared / own / foreign); idempotent ingest; pgvector search scoped to shared +
+own; one HTTP flow (register → login → session → upload → a second user gets 404).
+
+CI ([../.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs all of them on every push / PR with a
+`pgvector/pgvector:pg17` service container.
 
 ## Database schema (Alembic)
 
@@ -19,17 +49,6 @@ uv run alembic downgrade -1     # undo the last migration
 ```
 
 Migrations live in `migrations/versions/` and are plain SQL. New one: `uv run alembic revision -m "what changes"`.
-
-## Auth
-
-Set `JWT_SECRET` in `.env` (at least 32 chars; the app will not start without it):
-
-```powershell
-uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-Try them in `/docs` (Authorize), or against a running server:
-`uv run python scripts/auth_smoke.py http://127.0.0.1:8000`.
 
 ## Endpoints
 
@@ -63,3 +82,14 @@ Ingest the FastAPI docs into Postgres (needs the schema from `alembic upgrade he
 ```powershell
 uv run python -m mnemonic.ingest
 ```
+
+## Auth
+
+Set `JWT_SECRET` in `.env` (at least 32 chars; the app will not start without it):
+
+```powershell
+uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Try it in `/docs` (Authorize), or against a running server:
+`uv run python scripts/auth_smoke.py http://127.0.0.1:8000`.
