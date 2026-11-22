@@ -73,6 +73,18 @@ Filled in as the project grows.
 # backend (from lab 31)
 cd backend
 uv run fastapi dev src/mnemonic/main.py   # http://127.0.0.1:8000
-uv run pytest
+uv run pytest                              # unit tests; integration tests skip themselves
+$env:TEST_DATABASE_URL = "postgresql://..."  # a THROWAWAY database: these tests wipe it
+uv run pytest -m integration               # real Postgres + pgvector (CI runs them every push)
 uv run ruff check . ; uv run ruff format .
+uv run alembic upgrade head                # apply migrations (DATABASE_URL)
+uv run alembic downgrade -1                # undo the last one
+uv run alembic revision -m "what changes"  # new raw-SQL migration
+
+# frontend (from lab 22)
+cd frontend
+npm run dev       # runs the API preflight first
+npm run doctor    # only the preflight: is VITE_API_URL reachable and the right API?
+npm run test      # vitest
+npx tsc -b ; npx oxlint ; npm run build
 ```

@@ -63,3 +63,14 @@ Known limits: the token is valid until it expires even after logout (no revocati
 has no per-IP limit of its own (the user must be logged in); deleting an account does not invalidate
 other already-issued tokens by itself, but `get_current_user` looks the user up on every request, so
 they stop working at once.
+
+## Tests and delivery (lab 21, M4)
+
+| Topic | Decision |
+|---|---|
+| Integration tests | `tests/integration/`, marker `integration`, run only with `TEST_DATABASE_URL`. The session fixture drops the `public` schema and runs `alembic upgrade head` in-process (`migrations/env.py` takes the URL from `config.attributes`); tables are truncated between tests. Unit tests keep using `MemoryStore` (fast, no DB). |
+| Safety guard | The suite refuses to start (`pytest.exit`) when `TEST_DATABASE_URL` has the same host + port + database as `DATABASE_URL`: the fixture wipes the database it gets. |
+| Races | Tested with threads released by a `threading.Barrier`: one email registered twice, N uploads against a limit of 3. |
+| CI | GitHub Actions, two jobs (`backend` with a `pgvector/pgvector:pg17` service, `frontend`), `contents: read`, older runs cancelled. `HF_HUB_OFFLINE=1` makes any model download fail. |
+| CD | `render.yaml`: `autoDeployTrigger: checksPass` (deploy only after GitHub checks pass), `healthCheckPath: /health`, `alembic upgrade head && uvicorn ...` as the start command (`preDeployCommand` needs a paid plan). |
+| SPA preflight | `npm run dev` / `npm run doctor` fetch `<VITE_API_URL>/openapi.json` and require `/auth/register` and `/sessions`, so a wrong URL or an old deploy fails in one line before the app starts. |
