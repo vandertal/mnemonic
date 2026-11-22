@@ -6,7 +6,9 @@
   "scripts": {
     "predev": "node scripts/check-env.mjs",
     "dev": "vite",
+    "doctor": "node scripts/check-env.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "test": "vitest run",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
