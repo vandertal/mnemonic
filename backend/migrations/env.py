@@ -8,12 +8,14 @@ from sqlalchemy import create_engine, pool
 from mnemonic.config import get_settings
 
 config = context.config
-if config.config_file_name is not None:
+# Tests run Alembic in-process: they pass their own URL and keep pytest's logging untouched
+# (fileConfig would disable every logger that already exists, e.g. the ones caplog watches).
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 
 def database_url() -> str:
-    url = get_settings().database_url
+    url = config.attributes.get("database_url") or get_settings().database_url
     if not url:
         raise RuntimeError("DATABASE_URL is not set (see backend/.env.example)")
     # SQLAlchemy would pick psycopg2 for a plain postgresql:// URL; we ship psycopg 3.
