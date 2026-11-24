@@ -2,6 +2,7 @@ import { BookOpen } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { OfflineBanner } from '@/components/offline-banner'
+import { ColdStartBanner } from '@/components/cold-start-banner'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Card } from '@/components/ui/card'
 
@@ -11,6 +12,7 @@ export function AuthLayout({ title, description, children }: { title: string; de
     <div className="relative grid min-h-dvh place-items-center bg-background px-4 py-16">
       <div className="absolute inset-x-0 top-0">
         <OfflineBanner />
+        <ColdStartBanner />
       </div>
       <div className="absolute top-4 right-4 flex gap-2">
         <LanguageSwitcher />

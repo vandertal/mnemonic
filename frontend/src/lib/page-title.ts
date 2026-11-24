@@ -17,8 +17,12 @@ export function usePageTitle() {
   const { t, i18n } = useTranslation()
   const { pathname } = useLocation()
   useEffect(() => {
+    if (pathname === '/') {
+      document.title = t('landing.metaTitle') // the landing page: a full sentence, no "· Mnemonic"
+      return
+    }
     const section = pathname.startsWith('/chat/') ? '/chat' : pathname
-    const key = TITLE_KEYS[section] ?? (pathname === '/' ? 'nav.chat' : 'notFound.title')
+    const key = TITLE_KEYS[section] ?? 'notFound.title'
     document.title = `${t(key)} · ${t('app.name')}`
   }, [pathname, t, i18n.language])
 }

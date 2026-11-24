@@ -40,11 +40,38 @@ export class ConflictError extends ApiError {
   }
 }
 
-/** 429: too many requests (auth attempts, or the LLM budget). */
+/** 429: too many requests (auth attempts, or the LLM budget). `retryAfter` is the server's Retry-After, in seconds. */
 export class RateLimitError extends ApiError {
-  constructor(detail: string) {
+  readonly retryAfter: number | null
+  constructor(detail: string, retryAfter: number | null = null) {
     super(429, detail)
     this.name = 'RateLimitError'
+    this.retryAfter = retryAfter
+  }
+}
+
+/** One problem from FastAPI's 422 list (`loc` and `msg` are all we use; `input` is never sent back). */
+export interface FieldProblem {
+  loc: (string | number)[]
+  msg: string
+  type: string
+}
+
+/** 422: the server rejected the input (too long, blank, ...). `problems` is FastAPI's list. */
+export class ValidationError extends ApiError {
+  readonly problems: FieldProblem[]
+  constructor(detail: string, problems: FieldProblem[]) {
+    super(422, detail)
+    this.name = 'ValidationError'
+    this.problems = problems
+  }
+}
+
+/** The answer stream ended without a `done` or `error` event: the connection dropped mid-answer. */
+export class StreamInterruptedError extends Error {
+  constructor() {
+    super('The answer stream ended unexpectedly')
+    this.name = 'StreamInterruptedError'
   }
 }
 
@@ -56,8 +83,15 @@ export class NotFoundError extends ApiError {
   }
 }
 
+/** `Retry-After` is whole seconds (or an HTTP date, which our server never sends): a number or null. */
+export function parseRetryAfter(value: string | null | undefined): number | null {
+  if (!value || !/^\d+$/.test(value.trim())) return null
+  const seconds = Number(value)
+  return seconds > 0 && seconds <= 3600 ? seconds : null
+}
+
 /** Pick the typed error for a status. */
-export function errorForStatus(status: number, detail: string): ApiError {
+export function errorForStatus(status: number, detail: string, extra: { retryAfter?: number | null; problems?: FieldProblem[] } = {}): ApiError {
   switch (status) {
     case 401:
       return new AuthError(detail)
@@ -68,7 +102,10 @@ export function errorForStatus(status: number, detail: string): ApiError {
     case 409:
       return new ConflictError(detail)
     case 429:
-      return new RateLimitError(detail)
+      return new RateLimitError(detail, extra.retryAfter ?? null)
+    case 422:
+      // A plain-string detail ("The file has no text") is already a readable sentence: keep it as is.
+      return extra.problems?.length ? new ValidationError(detail, extra.problems) : new ApiError(422, detail)
     default:
       return new ApiError(status, detail)
   }

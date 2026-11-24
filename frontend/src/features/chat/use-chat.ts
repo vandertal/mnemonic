@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { fetchHistory, streamChat } from '@/api/chat'
-import { NotFoundError, isAbort } from '@/api/errors'
+import { NotFoundError, RateLimitError, isAbort } from '@/api/errors'
 import type { Source, ToolEvent } from '@/api/types'
+import i18n from '@/i18n'
 import { describeError, toastError } from '@/lib/errors'
+import { cleanQuestion } from './question'
 
 export interface ChatMessage {
   key: string
@@ -14,6 +17,10 @@ export interface ChatMessage {
   tools: ToolEvent[]
   status: 'streaming' | 'done' | 'stopped' | 'error'
   error?: string
+  /** Seconds the server asked us to wait (HTTP 429 Retry-After): the retry button counts them down. */
+  retryAfter?: number
+  /** Produced in this browser session (not loaded from history): only these get onboarding hints. */
+  live?: boolean
 }
 
 type History = 'loading' | 'ready' | 'error' | 'notFound'
@@ -76,8 +83,12 @@ export function useChat(sessionId: string, callbacks: Callbacks) {
   useEffect(() => () => abortRef.current?.abort(), [])
 
   const send = useCallback(async (text: string) => {
-    const question = text.trim()
-    if (!question || abortRef.current) return
+    const question = cleanQuestion(text)
+    if (abortRef.current) return
+    if (!question) {
+      toast.error(i18n.t('errors.emptyInput'))
+      return
+    }
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setBusy(true)
@@ -90,7 +101,7 @@ export function useChat(sessionId: string, callbacks: Callbacks) {
     setMessages((all) => [
       ...all,
       { key: `u-${id}`, role: 'user', content: question, sources: [], tools: [], status: 'done' },
-      { key: assistantKey, role: 'assistant', content: '', sources: [], tools: [], status: 'streaming' },
+      { key: assistantKey, role: 'assistant', content: '', sources: [], tools: [], status: 'streaming', live: true },
     ])
 
     try {
@@ -99,7 +110,8 @@ export function useChat(sessionId: string, callbacks: Callbacks) {
         else if (ev.type === 'sources') patch((m) => ({ ...m, sources: ev.sources }))
         else if (ev.type === 'tool') patch((m) => ({ ...m, tools: [...m.tools, ev.tool] }))
         else if (ev.type === 'done') patch((m) => ({ ...m, status: 'done', messageId: ev.messageId ?? undefined }))
-        else patch((m) => ({ ...m, status: 'error', error: ev.message }))
+        // The server's text is English: show our own localized sentence, keep the partial answer.
+        else patch((m) => ({ ...m, status: 'error', error: i18n.t('errors.llm') }))
       }
       patch((m) => (m.status === 'streaming' ? { ...m, status: 'done' } : m))
     } catch (e) {
@@ -108,7 +120,13 @@ export function useChat(sessionId: string, callbacks: Callbacks) {
         setHistory('notFound')
         cb.current.onNotFound()
       } else {
-        patch((m) => ({ ...m, status: 'error', error: describeError(e) }))
+        const wait = e instanceof RateLimitError ? (e.retryAfter ?? undefined) : undefined
+        patch((m) => ({
+          ...m,
+          status: 'error',
+          error: wait ? i18n.t('errors.busy') : describeError(e),
+          retryAfter: wait,
+        }))
         toastError(e)
       }
     } finally {
