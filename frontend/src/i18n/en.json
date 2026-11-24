@@ -63,10 +63,9 @@
     "you": "You",
     "assistant": "Mnemonic",
     "suggestions": [
-      "How do I declare a path parameter in FastAPI?",
-      "What is dependency injection in FastAPI?",
-      "How do I validate a request body with Pydantic?",
-      "How much is 15% of 2480?"
+      "How do I enable CORS in FastAPI?",
+      "How do I define a request body with a Pydantic model?",
+      "How do I run a background task after returning a response?"
     ],
     "loadMore": "Load more",
     "sessionsFailed": "Couldn't load your chats.",
@@ -74,7 +73,12 @@
     "renameSessionNamed": "Rename chat “{{title}}”",
     "notFoundTitle": "Chat not found",
     "notFoundText": "This chat doesn't exist or was deleted.",
-    "openLatest": "Back to my chats"
+    "openLatest": "Back to my chats",
+    "kbReady": "The FastAPI documentation is loaded. Tap a question to start:",
+    "examplesLabel": "Example questions",
+    "counter": "{{count}} / {{max}}",
+    "tryAgain": "Try again",
+    "retryIn": "Try again in {{seconds}} s"
   },
   "source": {
     "open": "Open source {{n}}",
@@ -192,13 +196,65 @@
     "server": "The server had a problem. Please try again.",
     "forbidden": "You don't have access to that.",
     "conflict": "That already exists.",
-    "notFound": "Not found. It may have been deleted."
+    "notFound": "Not found. It may have been deleted.",
+    "busyWait": "The service is busy right now. Try again in {{seconds}} s.",
+    "tooLong": "That is too long. Questions can have up to 2000 characters.",
+    "emptyInput": "Type a question first.",
+    "invalidInput": "The server could not accept that input. Check it and try again.",
+    "streamCut": "The connection dropped while the answer was being written. Try again.",
+    "llm": "The model couldn't finish the answer. Please try again."
   },
   "common": {
     "cancel": "Cancel",
     "loading": "Loading…"
   },
   "offline": {
-    "banner": "You're offline. Changes will work again when the connection returns."
+    "banner": "You're offline. Changes will work again when the connection returns.",
+    "retry": "Retry"
+  },
+  "coldStart": {
+    "banner": "The server is waking up (free tier). This can take up to a minute.",
+    "elapsed": "{{seconds}} s"
+  },
+  "onboarding": {
+    "cardsHint": "Tip: press “Make flashcards” to remember this answer.",
+    "dismiss": "Dismiss the tip"
+  },
+  "landing": {
+    "metaTitle": "Mnemonic: study with answers you can verify",
+    "metaDescription": "Ask your notes. Every answer cites its sources or honestly says it doesn't know, and turns into flashcards.",
+    "skip": "Skip to content",
+    "navLabel": "Main",
+    "login": "Log in",
+    "eyebrow": "AI study assistant",
+    "heroTitle": "Ask your notes. Get answers you can verify.",
+    "heroSub": "Every answer cites its source, or honestly says “not in your materials”. One click turns it into flashcards.",
+    "tryIt": "Try it",
+    "tryHint": "Takes under a minute. A ready knowledge base (the FastAPI docs) is waiting for your first question.",
+    "mockLabel": "Preview of a Mnemonic answer with citations",
+    "mockQuestion": "How do I enable CORS in FastAPI?",
+    "mockAnswer1": "Add CORSMiddleware to your app and list the origins you trust in allow_origins",
+    "mockAnswer2": "Without it, browsers block requests coming from another domain",
+    "mockSources": "Sources",
+    "mockMake": "Make flashcards",
+    "stepsTitle": "How it works",
+    "step1Title": "Ask",
+    "step1Text": "Type a question, or tap an example. The answer streams in.",
+    "step2Title": "Verify the source",
+    "step2Text": "Click a [1] chip to read the exact passage the answer is based on.",
+    "step3Title": "Make cards",
+    "step3Text": "Turn the answer into flashcards and review them to remember it.",
+    "featuresTitle": "Why you can trust it",
+    "f1Title": "Cited answers",
+    "f1Text": "Every claim points to a passage you can open. No source, no claim.",
+    "f2Title": "Honest “I don't know”",
+    "f2Text": "If the material doesn't cover the question, Mnemonic says so instead of inventing an answer.",
+    "f3Title": "Hybrid search",
+    "f3Text": "Keyword (BM25) and meaning-based search work together. “Why this result?” shows the score, term by term.",
+    "privacyTitle": "Privacy",
+    "privacyText": "Your chats and documents are private to your account, and you can delete the account any time in Settings. Your question and the passages found are sent to Google's Gemini model to write the answer. We count anonymous events such as “a question was answered” to improve the product, never the text of your questions.",
+    "ctaTitle": "Ask your first question in under a minute",
+    "footerProject": "A university project (42-Lab).",
+    "github": "Source on GitHub"
   }
 }
