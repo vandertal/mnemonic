@@ -1,8 +1,10 @@
 # Lab 15 — retrieval ablation
 
-Date: 2026-11-24 · retrieval only (no LLM) · shared knowledge base, 2203 chunks
-Config: `top_k=5`, candidates per retriever = 20,
-RRF k=60, `similarity_threshold=0.77`, BM25 k1=1.5 b=0.75, lexical query mode `any`.
+Date: 2026-11-24 · retrieval only (no LLM) · shared knowledge base,
+2203 chunks.
+Config: `top_k=5`, candidates per retriever =
+20, RRF k=60, `similarity_threshold=0.77`,
+BM25 k1=1.5 b=0.75, lexical query mode `any`.
 Reproduce: `cd backend; uv run python eval/retrieval_ablation.py`.
 
 Sets: **original** = the 7 questions of `eval/eval.json` (hit = expected file among the top-5);

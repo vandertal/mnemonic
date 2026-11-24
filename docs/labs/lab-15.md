@@ -52,9 +52,10 @@ So: the engine from the brief is built **by hand** as a pure Python package insi
 Tokenizer, stop words, positional index, BM25 + TF-IDF, AND/any/phrase/`-term`, snippets with offsets, `explain`, persistence, CLI with `--bench`, unit tests.
 Check: tests green; CLI answers a keyword query on the FastAPI docs in < 100 ms; bench numbers printed (index time, docs, terms, p50/p95).
 
-**M2 — Hybrid retrieval in the RAG + API.** [ ]
+**M2 — Hybrid retrieval in the RAG + API.** [x]
 Index built from DB chunks at startup + incremental updates; RRF fusion; `GET /search` and `GET /search/explain`; eval ablation with new short-query cases; ADR 0005.
 Check: eval table (vector / BM25 / hybrid) — short queries answered, IDK 3/3 and existing keyword/retrieval scores not worse; Render memory before/after measured.
+Done: gate (c) + `RETRIEVAL_MODE=hybrid` default; table in `docs/labs/lab-15-eval.md` (retrieval 7/7, short 10/10 vs 6/10, off-topic 10/10); ADR `docs/decisions/0005-hybrid-retrieval.md`. Render memory is still to be read from the startup log line after the deploy (after M3).
 
 **M3 — SPA + close.** [ ]
 Search panel with safe highlights and "why this result"; live smoke; README (screenshot, latency, tradeoffs lexical vs semantic, limitations); Reflection; tag `lab-15`.
