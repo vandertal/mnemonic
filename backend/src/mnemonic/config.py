@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     max_documents_per_owner: int = 5
     # Comma-separated emails allowed to read GET /admin/stats (empty = nobody; the route is a 404).
     admin_emails: str = ""
+    # Telegram bot (optional: without a token the webhook route answers 404 and nothing starts).
+    # Token from @BotFather; the secret is any long random string; PUBLIC_URL is this service's
+    # own https address (Render), used to register the webhook with Telegram at startup.
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    public_url: str = ""
     # Browser origins allowed to call the API (comma-separated). The default is the Vite dev server.
     cors_origins: str = "http://localhost:5173"
 

@@ -1,6 +1,6 @@
 # Lab 34 — failure audit
 
-What the user sees when something goes wrong. Audited on 2026-11-24 (M1).
+What the user sees when something goes wrong. Audited on 2026-11-24 (M1); rows 21-31 were added with the Telegram bot (M5).
 **ok** = already handled before the audit. **fixed** = a gap found in the audit and closed in M1.
 Tests named in the last column pin the behaviour (`backend/tests/…`, `frontend/src/…`).
 
@@ -26,6 +26,17 @@ Tests named in the last column pin the behaviour (`backend/tests/…`, `frontend
 | 18 | **Server 5xx / unknown error** | "The server had a problem. Please try again." (never a stack trace or raw JSON). | ok | manual |
 | 19 | **Chat deleted on another device** | "Chat not found" card with a button back to the latest chat. | ok | manual |
 | 20 | **The metrics table is broken** | Nothing: events are written best-effort, the request succeeds. | fixed (new feature, designed this way) | `test_events.py::test_a_broken_events_table_does_not_break_signup_or_chat` |
+| 21 | **Telegram: an update arrives twice** (Telegram retries a slow webhook, e.g. after a cold start) | One answer. The webhook answers 200 at once; a 1000-entry `update_id` memory drops the repeat. | fixed (new feature, designed this way) | `test_telegram.py::test_the_same_update_id_is_answered_once` |
+| 22 | **Telegram: wrong or missing webhook secret** | Nothing for the sender: 404 (the route does not reveal itself); nothing is processed. | fixed | `test_telegram.py::test_a_wrong_secret_in_the_path_or_the_header_is_a_404`, `test_ownership.py::test_secret_guarded_routes_are_closed_without_the_secret` |
+| 23 | **Telegram: 429 / the service-wide LLM budget is spent** | "The service is busy right now. Try again in a minute." | fixed | `test_telegram.py::test_an_exhausted_service_budget_is_a_friendly_busy_message` |
+| 24 | **Telegram: one person floods the bot** | "You're sending messages too fast. Try again in N s." (per person; the web's per-IP limit is useless there). No LLM call is made. | fixed | `test_telegram.py::test_a_per_person_rate_limit_stops_a_flood_without_calling_the_llm` |
+| 25 | **Telegram: model error or timeout** | "The model couldn't finish the answer. Please try again." (cards: "…couldn't make flashcards…"). The question is not echoed and not logged. | fixed | `test_telegram.py::test_a_provider_error_is_a_friendly_sentence_and_not_logged_with_the_question`, `test_a_timeout_is_a_friendly_sentence` |
+| 26 | **Telegram: a photo, voice message or sticker** | "I only understand text questions for now. Please type your question." | fixed | `test_telegram.py::test_non_text_messages_get_a_short_text_only_reply` |
+| 27 | **Telegram: over-long question (> 2000 characters), or text the database cannot store (NUL)** | "That is too long. Questions can have up to 2000 characters." / "I could not read that…". The text is not echoed and costs no LLM call. | fixed | `test_telegram.py::test_an_over_long_question_is_a_readable_message_and_is_not_echoed` |
+| 28 | **Telegram: the answer is longer than 4096 characters, or contains `<`, `&`** | Sent as several messages split on paragraph boundaries; everything is HTML-escaped, so the model (or a document) cannot inject markup or make Telegram reject the message. | fixed | `test_telegram.py::test_a_long_answer_is_sent_as_several_messages_with_sources_at_the_end`, `test_model_output_is_always_html_escaped` |
+| 29 | **Telegram: `/cards` with nothing to learn from** (no answer yet, new chat, or the last answer was a refusal) | A one-line hint instead of an error or a wasted LLM call. | fixed | `test_telegram.py::test_cards_before_any_question`, `test_cards_after_a_refusal_say_there_is_nothing_to_learn` |
+| 30 | **Telegram: the bot crashes inside the background task**, or Telegram refuses our reply (the user blocked the bot) | The app keeps running; the person gets one calm sentence if Telegram accepts it. The log has the exception type and frames, not its message. | fixed | `test_telegram.py::test_a_crash_in_the_background_task_does_not_crash_the_app`, `test_a_failing_send_is_swallowed` |
+| 31 | **Telegram: webhook registration fails at startup** (Telegram down, wrong token) | The app starts normally; one log line, never with the token or the URL. | fixed | `test_telegram.py::test_a_failing_webhook_registration_does_not_stop_the_app` |
 
 ## Not covered (known, honest)
 

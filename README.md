@@ -52,6 +52,7 @@ are one tap away. More: [docs/PRODUCT.md](docs/PRODUCT.md).
 - **Graceful failures.** Offline banner with retry, "server is waking up" banner, 429 countdown, cut-off streams, weird
   input: [docs/labs/lab-34-failures.md](docs/labs/lab-34-failures.md).
 - **One tracked metric.** Server-side events and an owner-only `GET /admin/stats`: [ADR 0006](docs/decisions/0006-capstone-metrics.md).
+- **Telegram bot.** The same RAG, citations and flashcards in a chat app: [Telegram bot](#telegram-bot), [ADR 0007](docs/decisions/0007-telegram-client.md).
 
 ## Tech stack
 
@@ -205,6 +206,44 @@ How it is measured: every LLM call writes a row to `llm_calls` (tokens in / out,
   nothing: no LLM call.
 - TODO_STUDENT: replace the assumption with the real `avg_per_active_user_usd` from `/admin/stats` once real users exist,
   and set a hard billing limit at the provider.
+
+## Telegram bot
+
+A second client of the same backend ([ADR 0007](docs/decisions/0007-telegram-client.md)): send a question to the bot and
+get the same cited answer (or the honest "not in your materials"), then `/cards` for flashcards. It calls the same
+functions as the web routes, so limits, citations and events are identical.
+
+| Message | What happens |
+|---|---|
+| plain text | a question: the answer plus a **Sources** list (`[1] heading — path`), or the "I don't know" refusal as is |
+| `/start` | a 2-line welcome and the three example questions as buttons (the same as the web) |
+| `/cards` | up to 5 flashcards ("Q / A") for the last answered question |
+| `/new` | a fresh chat (the bot forgets this conversation) |
+| `/help` | the list above |
+| photo, voice, sticker | "text questions only" |
+
+It is optional: without `TELEGRAM_BOT_TOKEN` the app runs exactly as before and the webhook route is a 404.
+
+**Create and connect it**
+
+1. In Telegram open [@BotFather](https://t.me/BotFather), send `/newbot`, pick a name and a username ending in `bot`. Copy the token.
+2. Make a webhook secret: `uv run python -c "import secrets; print(secrets.token_urlsafe(32))"` (from `backend/`).
+3. Set three variables on the backend (Render: Environment; locally in `backend/.env`):
+   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `PUBLIC_URL` (the service's own https address).
+   On start the app calls Telegram's `setWebhook` with `PUBLIC_URL/telegram/webhook/<secret>` and the same secret as the
+   `X-Telegram-Bot-Api-Secret-Token`; a failure is only logged. Restart or redeploy to (re-)register.
+4. Optional: build the SPA with `VITE_TELEGRAM_BOT_URL=https://t.me/<your_bot_username>` to show an "Open in Telegram" link
+   on the landing page (hero and footer). Unset = hidden.
+5. Telegram cannot reach `localhost`: locally use any https tunnel for `PUBLIC_URL`, or rely on the unit tests (they never call Telegram).
+
+**Limitations (honest)**
+
+- **One shared knowledge base**: the bot has no way to upload files; a Telegram user only sees the shared FastAPI docs.
+- **Text only**: no photos, voice or files; private chats only (groups are ignored).
+- **Free-tier cold start**: after a sleep the first reply can take up to a minute (Telegram retries, duplicates are dropped).
+- A Telegram account has no web login by design (its password is a hash of an unknown secret); deleting it is an owner action
+  on the `users` row (the cascade removes the chats).
+- Telegram itself carries the questions, then Gemini sees them as on the web.
 
 ## Run locally
 

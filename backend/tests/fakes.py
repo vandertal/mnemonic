@@ -1,3 +1,4 @@
+import threading
 from collections.abc import AsyncIterator, Iterable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from mnemonic.store import (
     User,
     assemble_stats,
     first_line_title,
+    telegram_email,
 )
 
 
@@ -71,6 +73,8 @@ class MemoryStore:
         self.documents: dict[int, tuple[UUID, StoredDocument]] = {}
         self.chunk_document: dict[int, int] = {}
         self.users: dict[UUID, tuple[User, str]] = {}
+        self.telegram: dict[int, UUID] = {}  # telegram_id -> user id
+        self._telegram_lock = threading.Lock()
         self.events: list[tuple[str, UUID | None, dict, datetime]] = []
         self.fail_events = False  # a test switch: log_event raises like a broken database
         self._next_id = 0
@@ -92,6 +96,21 @@ class MemoryStore:
         entry = self.users.get(user_id)
         return entry[0] if entry else None
 
+    def find_telegram_user(self, telegram_id: int) -> User | None:
+        uid = self.telegram.get(telegram_id)
+        return self.users[uid][0] if uid else None
+
+    def get_or_create_telegram_user(
+        self, telegram_id: int, password_hash: str
+    ) -> tuple[User, bool]:
+        with self._telegram_lock:  # the real store serialises with an advisory lock
+            found = self.find_telegram_user(telegram_id)
+            if found:
+                return found, False
+            user = self.create_user(telegram_email(telegram_id), password_hash)
+            self.telegram[telegram_id] = user.id
+            return user, True
+
     def _now(self) -> datetime:
         """A strictly increasing fake clock, so 'newest first' is never a tie."""
         self._ticks += 1
@@ -100,6 +119,7 @@ class MemoryStore:
     def delete_user(self, user_id: UUID) -> bool:
         if self.users.pop(user_id, None) is None:
             return False
+        self.telegram = {t: u for t, u in self.telegram.items() if u != user_id}  # cascade
         for sid in [i for i, (owner, _) in self.sessions.items() if owner == user_id]:
             self.delete_session(user_id, sid)
         for did in [i for i, (owner, _) in self.documents.items() if owner == user_id]:
@@ -188,6 +208,13 @@ class MemoryStore:
             totals[name] = totals.get(name, 0) + 1
             day = per_day.setdefault(at.date(), {})
             day[name] = day.get(name, 0) + 1
+        by_channel: dict[tuple[str, str], int] = {}
+        users_of: dict[str, set] = {}
+        for name, uid, props, _ in self.events:
+            channel = props.get("channel", "web")
+            by_channel[(channel, name)] = by_channel.get((channel, name), 0) + 1
+            if uid:
+                users_of.setdefault(channel, set()).add(uid)
         answered = [(u, p) for n, u, p, _ in self.events if n == "question_answered"]
         cited = {u for u, p in answered if p.get("cited")}
         active = {u for u, _ in answered}
@@ -202,6 +229,8 @@ class MemoryStore:
             len(self.llm_calls),
             today,
             days,
+            by_channel,
+            {c: len(u) for c, u in users_of.items()},
         )
 
     def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:

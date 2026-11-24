@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 // src/i18n touches `document` when it is imported; there is no DOM in the Node test environment.
 vi.hoisted(() => {
@@ -79,6 +79,30 @@ describe.each(['en', 'uk'] as const)('landing page (%s)', (lang) => {
 
   it('never injects raw HTML', () => {
     expect(out).not.toContain('dangerouslySetInnerHTML')
+  })
+})
+
+describe.each(['en', 'uk'] as const)('landing page Telegram link (%s)', (lang) => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('is hidden when VITE_TELEGRAM_BOT_URL is not set', () => {
+    vi.stubEnv('VITE_TELEGRAM_BOT_URL', '')
+    expect(html(lang)).not.toContain('t.me')
+  })
+
+  it('is hidden when the value is not an https://t.me link', () => {
+    vi.stubEnv('VITE_TELEGRAM_BOT_URL', 'https://evil.example/bot')
+    expect(html(lang)).not.toContain('evil.example')
+  })
+
+  it('shows in the hero and the footer, in the page language, when it is set', () => {
+    vi.stubEnv('VITE_TELEGRAM_BOT_URL', 'https://t.me/MnemonicStudyBot')
+    const out = html(lang)
+    const label = i18n.getFixedT(lang)('landing.telegram')
+    expect(count(out, /href="https:\/\/t\.me\/MnemonicStudyBot"/g)).toBe(2)
+    expect(out).toMatch(new RegExp(`data-testid="telegram-hero"[^>]*>(?:<svg.*?</svg>)?${label}</a>`))
+    expect(out).toMatch(new RegExp(`data-testid="telegram-footer"[^>]*>${label}</a>`))
+    expect(out).toMatch(/<a[^>]*href="https:\/\/t\.me\/MnemonicStudyBot"[^>]*rel="noopener noreferrer"/)
   })
 })
 

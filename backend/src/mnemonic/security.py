@@ -26,6 +26,12 @@ def get_auth_limiter() -> SlidingWindowLimiter:
     return SlidingWindowLimiter(get_settings().auth_rate_limit_per_minute)
 
 
+@lru_cache
+def get_telegram_limiter() -> SlidingWindowLimiter:
+    """Per Telegram user (not per IP: every update comes from Telegram's servers)."""
+    return SlidingWindowLimiter(get_settings().rate_limit_per_minute)
+
+
 def limit_auth_per_ip(
     request: Request, limiter: Annotated[SlidingWindowLimiter, Depends(get_auth_limiter)]
 ) -> None:

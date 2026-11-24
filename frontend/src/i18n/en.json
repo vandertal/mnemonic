@@ -255,6 +255,7 @@
     "privacyText": "Your chats and documents are private to your account, and you can delete the account any time in Settings. Your question and the passages found are sent to Google's Gemini model to write the answer. We count anonymous events such as “a question was answered” to improve the product, never the text of your questions.",
     "ctaTitle": "Ask your first question in under a minute",
     "footerProject": "A university project (42-Lab).",
-    "github": "Source on GitHub"
+    "github": "Source on GitHub",
+    "telegram": "Open in Telegram"
   }
 }

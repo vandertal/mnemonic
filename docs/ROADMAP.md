@@ -22,12 +22,12 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 - [x] 21 — REST API With Auth · accounts, tests, CI/CD; deployed, live smoke 6/6 (open: `git tag lab-21` on main, TODO_LIVE_URL in README, Reflection rewrite)
 - [x] **15 — Mini Search Engine** · own inverted index → hybrid retrieval in the RAG; SPA search screen (code done; open: deploy + live smoke + screenshot, Reflection rewrite in own words, `git tag lab-15` on main)
 - [~] 33 — Object Detection & Tracking · replaced by 15 (plan archived in `docs/labs/lab-33.md`)
-- [~] 34 — AI Capstone · M1 done in code (landing, onboarding, failure audit, metric, README); open: PR merge, deploy + `ADMIN_EMAILS`, real users (M3), demo video, tag
+- [~] 34 — AI Capstone · M1 and M5 done in code (landing, onboarding, failure audit, metric, README; Telegram bot); open: PRs merge, `uv add aiogram`, deploy + env vars, real users (M3), demo video, tag
 - [ ] 42 — Life, the Universe, and Everything · MANIFESTO, video, retro
 
 ## Current lab
 
-**Lab 34 — M1 done (branch `lab34-m1`).** Details and the student checklist: [`docs/labs/lab-34.md`](labs/lab-34.md). Next: M3 (real users) in parallel, then M4 (close).
+**Lab 34 — M1 and M5 done in code (M5: branch `lab34-m5`, Telegram bot, [ADR 0007](decisions/0007-telegram-client.md)).** Details and the student checklists: [`docs/labs/lab-34.md`](labs/lab-34.md). Next: M3 (real users) in parallel, then M4 (close).
 
 Previous lab, still open:
 

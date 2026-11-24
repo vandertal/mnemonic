@@ -32,7 +32,7 @@ instead of reading everything, then turn them into flashcards.
 - **M3 — Users (student-driven, starts NOW in parallel).** 10+ people, watch 3 in person/call, notes in `docs/user-feedback/session1..3.md`, iterations in `iterations.md`.
 - **M4 — Close.** README per brief list (14 items), 60 s demo, deployment checklist, tag `lab-34`, Reflection in own words.
 
-- **M5 — Telegram bot (last, after M1).** Second client of the same API: same RAG, citations, flashcards. Also the cheapest way to get real users (M3). Needs a dependency decision (`python-telegram-bot` or `aiogram`) — agreed in the planning chat before coding.
+- [x] **M5 — Telegram bot (code done on branch `lab34-m5`, PR open, not merged).** Second client of the same backend: same RAG, citations, flashcards, limits, events; also the cheapest way to get real users (M3). Decision: `aiogram` 3.x, webhook inside the same service, identity in `telegram_accounts` — [ADR 0007](../decisions/0007-telegram-client.md). Failures: rows 21-31 of [lab-34-failures.md](lab-34-failures.md).
 
 ## Update 2026-11-24
 
@@ -55,3 +55,16 @@ Left for the student (everything else is in the repo):
 
 - Real users take calendar time → recruit before M1 is finished.
 - Second AI-skill wording in the intro (≥2 from 31/32/33): covered by 31 + 15; confirm 33→15 swap with the instructor.
+
+## Update 2026-11-24 — M5 (Telegram bot)
+
+**M5 status: code and docs done on branch `lab34-m5` (PR open, not merged).**
+
+Left for the student:
+
+- [ ] **Install the dependency:** `cd backend; uv add aiogram`, then commit `pyproject.toml` and `uv.lock`. It was approved for M5, but the install was blocked in the agent session, so neither file contains it yet. Until then the bot fails on the first message when a token is set; the app and every test work without a token.
+- [ ] Merge the PR after green CI (the new integration test `test_pg_telegram.py` and the changed migration test run on real Postgres only in CI).
+- [ ] BotFather: `/newbot`, copy the token. Render env vars (add by hand, they are `sync: false`): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` (`uv run python -c "import secrets; print(secrets.token_urlsafe(32))"`), `PUBLIC_URL` (the Render URL). Migration `0005` runs by itself on deploy; the webhook is registered on start.
+- [ ] Cloudflare Pages: build variable `VITE_TELEGRAM_BOT_URL=https://t.me/<bot username>`, then redeploy.
+- [ ] Smoke test in a real Telegram chat: `/start`, tap an example, ask something outside the docs (refusal), `/cards`, `/new`, send a photo. Then check `GET /admin/stats` -> `by_channel.telegram`.
+- [ ] Tell the groupmates for M3: the bot link is the easiest way in.
