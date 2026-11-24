@@ -1,4 +1,4 @@
-import { ArrowRight, BookOpen, Layers, Lock, MessageSquare, Search, SearchX, ShieldCheck, Quote } from 'lucide-react'
+import { ArrowRight, BookOpen, Layers, Lock, MessageSquare, Quote, Search, SearchX, Send, ShieldCheck } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ChatMock } from '@/features/landing/chat-mock'
+import { telegramBotUrl } from '@/lib/telegram'
 
 const GITHUB_URL = 'https://github.com/vandertal/mnemonic'
 
@@ -57,6 +58,7 @@ function useMetaDescription(text: string) {
 export default function LandingPage() {
   const { t } = useTranslation()
   useMetaDescription(t('landing.metaDescription'))
+  const telegramUrl = telegramBotUrl() // null unless the build sets VITE_TELEGRAM_BOT_URL
 
   return (
     <div className="relative min-h-dvh overflow-x-clip bg-background text-foreground">
@@ -118,6 +120,20 @@ export default function LandingPage() {
               </Button>
             </div>
             <p className="mx-auto mt-4 max-w-md text-sm text-muted-foreground lg:mx-0">{t('landing.tryHint')}</p>
+            {telegramUrl && (
+              <p className="mt-3 text-sm">
+                <a
+                  href={telegramUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="telegram-hero"
+                  className="inline-flex items-center gap-1.5 rounded-sm font-medium text-accent underline-offset-4 hover:underline"
+                >
+                  <Send className="size-3.5" aria-hidden="true" />
+                  {t('landing.telegram')}
+                </a>
+              </p>
+            )}
           </div>
           <div className="mx-auto w-full max-w-xl">
             <ChatMock />
@@ -198,6 +214,17 @@ export default function LandingPage() {
               <LanguageSwitcher />
               <ThemeToggle />
             </div>
+            {telegramUrl && (
+              <a
+                href={telegramUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="telegram-footer"
+                className="rounded-sm font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                {t('landing.telegram')}
+              </a>
+            )}
             <a
               href={GITHUB_URL}
               target="_blank"
