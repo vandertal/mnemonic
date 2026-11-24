@@ -10,6 +10,7 @@ from mnemonic.store import (
     DEFAULT_TITLE,
     Chunk,
     EmailTaken,
+    IndexRow,
     LLMCall,
     Session,
     SessionNotFound,
@@ -189,7 +190,8 @@ class MemoryStore:
         if self.count_documents(owner_id) >= max_documents:
             raise TooManyDocuments
         self._next_doc_id += 1
-        doc = StoredDocument(self._next_doc_id, filename, datetime.now(UTC), len(chunks))
+        ids = tuple(self._next_chunk_id + 1 + i for i in range(len(chunks)))
+        doc = StoredDocument(self._next_doc_id, filename, datetime.now(UTC), len(chunks), ids)
         self.documents[doc.id] = (owner_id, doc)
         for c in chunks:
             self._next_chunk_id += 1
@@ -200,14 +202,24 @@ class MemoryStore:
             self.chunk_document[self._next_chunk_id] = doc.id
         return doc
 
-    def delete_document(self, owner_id: UUID, document_id: int) -> bool:
+    def delete_document(self, owner_id: UUID, document_id: int) -> list[int] | None:
         entry = self.documents.get(document_id)
         if entry is None or entry[0] != owner_id:
-            return False
+            return None
         del self.documents[document_id]
-        for cid in [c for c, d in self.chunk_document.items() if d == document_id]:
+        ids = [c for c, d in self.chunk_document.items() if d == document_id]
+        for cid in ids:
             del self.chunks[cid], self.chunk_owner[cid], self.chunk_document[cid]
-        return True
+        return ids
+
+    def owned_chunk_ids(self, owner_id: UUID) -> list[int]:
+        return sorted(c for c, o in self.chunk_owner.items() if o == owner_id and c in self.chunks)
+
+    def index_rows(self) -> list[IndexRow]:
+        return [
+            IndexRow(c.id, self.chunk_owner.get(c.id), c.heading, c.content)
+            for c in self.chunks.values()
+        ]
 
 
 def login(store: MemoryStore, email: str = "alice@example.com", sessions: Iterable[UUID] = ()):

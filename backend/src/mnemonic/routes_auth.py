@@ -17,6 +17,7 @@ from mnemonic.auth import (
 from mnemonic.config import Settings, get_settings
 from mnemonic.openapi import R401, R422, R429
 from mnemonic.schemas import RegisterRequest, TokenOut, UserOut
+from mnemonic.search_service import SearchService, get_search_service
 from mnemonic.security import limit_auth_per_ip
 from mnemonic.store import EmailTaken, Store, User, get_store
 
@@ -112,7 +113,14 @@ async def me(user: Annotated[User, Depends(get_current_user)]) -> User:
     responses={401: R401},
 )
 async def delete_me(
-    user: Annotated[User, Depends(get_current_user)], store: Annotated[Store, Depends(get_store)]
+    user: Annotated[User, Depends(get_current_user)],
+    store: Annotated[Store, Depends(get_store)],
+    search: Annotated[SearchService, Depends(get_search_service)],
 ) -> Response:
-    await asyncio.to_thread(store.delete_user, user.id)  # the rest goes by ON DELETE CASCADE
+    def purge() -> None:
+        owned = store.owned_chunk_ids(user.id)  # read before the cascade removes the rows
+        store.delete_user(user.id)  # the rest goes by ON DELETE CASCADE
+        search.remove_chunks(owned)  # only after the DB delete succeeded
+
+    await asyncio.to_thread(purge)
     return Response(status_code=204)

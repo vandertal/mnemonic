@@ -19,6 +19,11 @@ TAGS = [
     {"name": "chat", "description": "Ask a question inside a session; the answer streams (SSE)."},
     {"name": "flashcards", "description": "Flashcards from a saved answer and its sources."},
     {"name": "documents", "description": "The caller's uploaded files (.md, .txt, .pdf)."},
+    {
+        "name": "search",
+        "description": "Keyword search (own BM25 index) over the knowledge base and the caller's "
+        "own documents, with highlighted snippets and a per-term score explanation.",
+    },
     {"name": "chunks", "description": "The text behind a citation."},
     {"name": "system", "description": "Liveness and the demo page."},
 ]

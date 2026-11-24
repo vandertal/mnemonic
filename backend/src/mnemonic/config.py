@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,6 +36,11 @@ class Settings(BaseSettings):
     # Below the threshold the app answers "I don't know" without calling the LLM.
     retrieval_top_k: int = 5
     similarity_threshold: float = 0.77
+    # Which retriever feeds the chat: pgvector only (the original behaviour), the lexical BM25
+    # index only, or both fused with Reciprocal Rank Fusion. See docs/decisions/0005.
+    retrieval_mode: Literal["vector", "bm25", "hybrid"] = "hybrid"
+    # How many candidates each retriever contributes to the fusion (the answer keeps top_k).
+    retrieval_candidates: int = 20
     # Conversation memory: how many of the latest saved messages (user + assistant) go into the
     # prompt. Only complete question/answer pairs count, so an odd value rounds down.
     history_messages: int = 6
