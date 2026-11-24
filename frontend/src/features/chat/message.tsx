@@ -1,9 +1,17 @@
-import { Calculator, Check, Copy, OctagonAlert, SearchX } from 'lucide-react'
+import { Calculator, Check, Copy, OctagonAlert, RotateCw, SearchX } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/card'
+import { CardsHint } from '@/features/onboarding/cards-hint'
+import {
+  dismissCardsHint,
+  isCardsHintDismissed,
+  shouldShowCardsHint,
+} from '@/features/onboarding/cards-hint-state'
+import { useCurrentUser } from '@/lib/auth'
+import { useCountdown } from '@/lib/use-countdown'
 import { cn } from '@/lib/utils'
 import { isRefusal, linkCitations, renumberCitations } from './citations'
 import { MakeFlashcardsButton } from '@/features/flashcards/make-flashcards'
@@ -43,8 +51,26 @@ function UserMessage({ message }: { message: ChatMessage }) {
   )
 }
 
-function AssistantMessage({ message, sessionId, question }: MessageProps) {
+/** "Try again" under a failed answer. After a 429 it waits out the server's Retry-After first. */
+function RetryButton({ seconds, onRetry }: { seconds?: number; onRetry: () => void }) {
   const { t } = useTranslation()
+  const left = useCountdown(seconds)
+  return (
+    <Button variant="outline" size="sm" className="mt-2" disabled={left > 0} onClick={onRetry}>
+      <RotateCw className="size-4" aria-hidden="true" />
+      {left > 0 ? t('chat.retryIn', { seconds: left }) : t('chat.tryAgain')}
+    </Button>
+  )
+}
+
+function AssistantMessage({ message, sessionId, question, isLast, onRetry }: MessageProps) {
+  const { t } = useTranslation()
+  const user = useCurrentUser()
+  const [hintDismissed, setHintDismissed] = useState(() => isCardsHintDismissed(user.id))
+  const dismissHint = () => {
+    dismissCardsHint(user.id)
+    setHintDismissed(true)
+  }
   const { content, status, sources, tools } = message
   const streaming = status === 'streaming'
   const refusal = !streaming && isRefusal(content)
@@ -91,9 +117,12 @@ function AssistantMessage({ message, sessionId, question }: MessageProps) {
       )}
 
       {status === 'error' && (
-        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 p-3 text-sm text-destructive" role="alert">
-          <OctagonAlert className="mt-0.5 size-4 shrink-0" />
-          {message.error}
+        <div className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive" role="alert">
+          <div className="flex items-start gap-2">
+            <OctagonAlert className="mt-0.5 size-4 shrink-0" />
+            {message.error}
+          </div>
+          {isLast && onRetry && <RetryButton seconds={message.retryAfter} onRetry={onRetry} />}
         </div>
       )}
       {status === 'stopped' && <p className="text-xs text-muted-foreground">{t('chat.stopped')}</p>}
@@ -113,10 +142,16 @@ function AssistantMessage({ message, sessionId, question }: MessageProps) {
         <div className="-ml-2 flex items-center gap-1">
           <CopyButton text={text} />
           {message.messageId && sources.length > 0 && (
-            <MakeFlashcardsButton sessionId={sessionId} messageId={message.messageId} question={question} />
+            <MakeFlashcardsButton
+              sessionId={sessionId}
+              messageId={message.messageId}
+              question={question}
+              onMake={dismissHint}
+            />
           )}
         </div>
       )}
+      {shouldShowCardsHint(message, !!isLast, hintDismissed) && <CardsHint onDismiss={dismissHint} />}
     </div>
   )
 }
@@ -125,6 +160,8 @@ interface MessageProps {
   message: ChatMessage
   sessionId: string
   question: string // the user question this answer belongs to
+  isLast?: boolean // the newest message of the chat
+  onRetry?: () => void // resend the question (offered under a failed last answer)
 }
 
 export function MessageView(props: MessageProps) {
