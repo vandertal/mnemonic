@@ -118,6 +118,7 @@ app.add_middleware(
     allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Retry-After"],  # the SPA shows a countdown from it on a 429
 )
 
 
