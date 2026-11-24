@@ -69,12 +69,12 @@ def gate_vector_or_lexical(hits: Sequence[Hit], threshold: float) -> bool:
     return gate_vector(hits, threshold) or any(h.lexical_all for h in hits)
 
 
-MAX_COMMON_TERM_DF = 0.2
+MAX_COMMON_TERM_DF = 0.1
 
 
 def gate_vector_or_specific_lexical(hits: Sequence[Hit], threshold: float) -> bool:
-    """(c) Like (b), but a term found in more than 20 % of all chunks ("python") says nothing
-    about the topic, so a match on it alone does not open the gate."""
+    """(c) Like (b), but a term found in more than 10 % of all chunks ("python", "example") says
+    nothing about the topic, so a match on it alone does not open the gate."""
     return gate_vector(hits, threshold) or any(
         h.lexical_all and h.lexical_max_df <= MAX_COMMON_TERM_DF for h in hits
     )
@@ -85,7 +85,7 @@ GATES: dict[str, Callable[[Sequence[Hit], float], bool]] = {
     "b": gate_vector_or_lexical,
     "c": gate_vector_or_specific_lexical,
 }
-ANSWER_GATE = "b"
+ANSWER_GATE = "c"  # chosen by the ablation: docs/labs/lab-15-eval.md, ADR 0005
 
 
 def is_answerable(hits: Sequence[Hit], threshold: float, mode: str = "hybrid") -> bool:
