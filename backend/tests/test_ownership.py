@@ -182,6 +182,11 @@ PUBLIC = {
 }
 
 
+# Routes guarded by a shared secret instead of a user token (checked separately below, and in
+# test_telegram.py): without the secret they must answer 404, never 200.
+SECRET_GUARDED = {("POST", "/telegram/webhook/{secret}")}
+
+
 def walk(routes):
     """Leaf routes as (method, path). Newer FastAPI wraps every included router in an
     `_IncludedRouter` that only yields its routes lazily, so a plain loop would see no
@@ -206,12 +211,21 @@ def test_every_route_except_the_public_ones_needs_a_token(store):
     # The walk must really reach nested routes; with fewer than this it checks nothing.
     assert {("POST", "/chat"), ("GET", "/sessions"), ("DELETE", "/auth/me")} <= routes
 
-    for method, path in sorted(routes - PUBLIC):
+    assert SECRET_GUARDED <= routes, "SECRET_GUARDED lists a route that no longer exists"
+    for method, path in sorted(routes - PUBLIC - SECRET_GUARDED):
         url = path.replace("{session_id}", str(uuid.uuid4())).replace("{chunk_id}", "1")
         url = url.replace("{document_id}", "1")
         assert "{" not in url, f"guard test does not know the parameter of {path}"
         response = client.request(method, url)
         assert response.status_code == 401, f"{method} {path} answered {response.status_code}"
+
+
+def test_secret_guarded_routes_are_closed_without_the_secret(store):
+    app.dependency_overrides[get_store] = lambda: store
+    client = TestClient(app)
+    for method, path in sorted(SECRET_GUARDED):
+        response = client.request(method, path.replace("{secret}", "guess"), json={})
+        assert response.status_code == 404, f"{method} {path} answered {response.status_code}"
 
 
 def test_old_api_key_header_alone_is_401(client):

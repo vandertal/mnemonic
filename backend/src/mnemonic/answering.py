@@ -12,7 +12,9 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -39,6 +41,8 @@ from mnemonic.store import LLMCall, SessionNotFound, Store, StoredMessage
 from mnemonic.tools import CALCULATOR, run_tool
 
 logger = logging.getLogger(__name__)
+
+Channel = Literal["telegram"] | None  # None = the web app
 
 
 @lru_cache
@@ -75,10 +79,14 @@ async def save_message(
     return await asyncio.to_thread(store.add_message, user_id, session_id, role, content, sources)
 
 
-async def refusal_stream(store: Store, user_id: UUID, session_id: UUID) -> AsyncIterator[str]:
+async def refusal_stream(
+    store: Store, user_id: UUID, session_id: UUID, channel: Channel = None
+) -> AsyncIterator[str]:
     yield sse(REFUSAL)
     message_id = await save_message(store, user_id, session_id, "assistant", REFUSAL, [])
-    await metrics.emit(store, metrics.QUESTION_ANSWERED, user_id, cited=False, refused=True)
+    await metrics.emit(
+        store, metrics.QUESTION_ANSWERED, user_id, channel, cited=False, refused=True
+    )
     yield sse({"message_id": message_id}, event="done")
 
 
@@ -131,6 +139,7 @@ async def event_stream(
     user_id: UUID,
     session_id: UUID,
     global_limiter: SlidingWindowLimiter | None = None,
+    channel: Channel = None,
 ) -> AsyncIterator[str]:
     """Stream the answer. With a tool-calling provider this is a loop: stream; if the model asks
     for a tool, run it, append the result and stream again (max MAX_TOOL_ROUNDS rounds). Every
@@ -232,7 +241,7 @@ async def event_stream(
         # The user already has the answer on screen; losing history is the lesser evil.
         logger.exception("could not save the assistant message")
     await metrics.emit(
-        store, metrics.QUESTION_ANSWERED, user_id, cited=bool(sources), refused=False
+        store, metrics.QUESTION_ANSWERED, user_id, channel, cited=bool(sources), refused=False
     )
     yield sse(sources, event="sources")
     yield sse({"message_id": message_id}, event="done")  # None if saving failed
@@ -248,6 +257,7 @@ async def start_answer(
     user_id: UUID,
     session_id: UUID,
     message: str,
+    channel: Channel = None,
 ) -> AsyncIterator[str]:
     """Check the session, retrieve, save the question and return the SSE body to stream.
 
@@ -275,13 +285,13 @@ async def start_answer(
     except SessionNotFound:  # deleted between the check above and now
         raise HTTPException(status_code=404, detail="Session not found") from None
     if refuse:
-        return refusal_stream(store, user_id, session_id)  # no LLM call: nothing relevant
+        return refusal_stream(store, user_id, session_id, channel)  # no LLM call: nothing relevant
     # Retrieval used only the current question; the model also sees the recent turns.
     current = ClientMessage(role="user", content=message)
     tools = getattr(provider, "supports_tools", False)
     messages = build_messages([*history, current], hits, tools=tools)
     return event_stream(
-        provider, messages, hits, settings, store, user_id, session_id, global_limiter
+        provider, messages, hits, settings, store, user_id, session_id, global_limiter, channel
     )
 
 
@@ -299,6 +309,7 @@ async def make_flashcards(
     user_id: UUID,
     session_id: UUID,
     message_id: int,
+    channel: Channel = None,
 ) -> FlashcardSet:
     """3-5 cards from one saved assistant answer and the chunks it cited (one LLM call).
 
@@ -354,5 +365,39 @@ async def make_flashcards(
     )
     if cards is None:
         raise HTTPException(status_code=502, detail=detail)
-    await metrics.emit(store, metrics.CARDS_MADE, user_id)
+    await metrics.emit(store, metrics.CARDS_MADE, user_id, channel)
     return check_source_ids(cards, {c.id for c in chunks})
+
+
+@dataclass
+class Collected:
+    """A whole answer, folded out of the SSE stream that the web client reads token by token."""
+
+    text: str = ""
+    sources: list[dict] = field(default_factory=list)
+    error: str | None = None  # set when the model failed; `text` is then only a partial answer
+    message_id: int | None = None
+
+
+async def collect_answer(stream: AsyncIterator[str]) -> Collected:
+    """Read the SSE stream of `start_answer` to the end. For clients that cannot show tokens as
+    they arrive (the Telegram bot sends one message). Same events, same rules as the web."""
+    out = Collected()
+    parts: list[str] = []
+    async for chunk in stream:
+        name, data = "message", None
+        for line in chunk.splitlines():
+            if line.startswith("event: "):
+                name = line[7:]
+            elif line.startswith("data: "):
+                data = json.loads(line[6:])
+        if name == "message" and isinstance(data, str):
+            parts.append(data)
+        elif name == "sources" and isinstance(data, list):
+            out.sources = data
+        elif name == "error":
+            out.error = str(data)
+        elif name == "done" and isinstance(data, dict):
+            out.message_id = data.get("message_id")
+    out.text = "".join(parts)
+    return out

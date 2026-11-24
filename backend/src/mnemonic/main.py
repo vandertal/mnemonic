@@ -31,6 +31,8 @@ from mnemonic.routes_admin import router as admin_router
 from mnemonic.routes_auth import router as auth_router
 from mnemonic.routes_search import router as search_router
 from mnemonic.routes_sessions import router as sessions_router
+from mnemonic.routes_telegram import get_telegram_api
+from mnemonic.routes_telegram import router as telegram_router
 from mnemonic.schemas import (
     ChatRequest,
     ChunkOut,
@@ -56,6 +58,7 @@ from mnemonic.store import (
     User,
     get_store,
 )
+from mnemonic.telegram_bot import register_webhook
 
 # uvicorn configures only its own loggers; without this our INFO lines would be dropped.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -79,10 +82,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     service = app.dependency_overrides.get(get_search_service, get_search_service)()
     store = app.dependency_overrides.get(get_store, get_store)()
     build = asyncio.create_task(asyncio.to_thread(build_from_store, service, store))
+    # Optional Telegram bot: with a token, tell Telegram our webhook address in the background
+    # (a slow Telegram must not delay the start; register_webhook never raises).
+    telegram = app.dependency_overrides.get(get_telegram_api, get_telegram_api)()
+    hook = asyncio.create_task(register_webhook(settings, telegram)) if telegram else None
     try:
         yield
     finally:
         await build  # build_from_store never raises; a thread cannot be cancelled anyway
+        if hook:
+            await hook
+        if telegram:
+            await telegram.close()
 
 
 app = FastAPI(
@@ -119,6 +130,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(sessions_router)
 app.include_router(search_router)
+app.include_router(telegram_router)
 
 access_log = logging.getLogger("mnemonic.access")
 
