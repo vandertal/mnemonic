@@ -425,8 +425,10 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 - **Multipart is parsed before the auth check** on `POST /documents` (the framework reads the form first).
 - **English-only embedder**; short one- or two-word questions may fall under the similarity threshold.
 - **The calculator only works after retrieval passes** (the "I don't know" gate runs first).
-- **The knowledge base and the embedder are English.** The example questions are English on purpose; a question in
-  Ukrainian may be refused because its embedding does not match the English chunks. The UI is fully localized.
+- **The knowledge base and the embedder are English.** The example questions are English on purpose. A question that is
+  mostly non-Latin text (Russian, Ukrainian, CJK, ...) is refused up front with the hint "Ask in English" (reason
+  `non_english`, no embedding and no LLM call). A question in another Latin-script language (German, Polish, ...) is not
+  detected and may still end in "I don't know". The UI is fully localized.
 - **No real-user evidence yet.** The metric and the feedback write-up exist as machinery; the numbers come after the
   first users (lab 34, M3).
 - **Link previews are English only.** The `og:` tags are static in `index.html` (crawlers do not run JavaScript).
@@ -436,9 +438,12 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 - **Memory on the free Render plan (512 MB).** One out-of-memory restart was observed on the first Telegram message
   during a cold start (the embedding model loads on the first question). Not reproduced or fixed; the memory numbers
   above are local measurements, the Render ones are still to be read from Render Metrics.
-- **Telegram `/cards` is unreliable in a real chat (open bug).** In a real chat the bot answered that the model could not
-  make flashcards (the 502 sentence). The web's "Make flashcards" calls the same `make_flashcards` function, so the
-  difference is not in the logic; the cause is not found yet (details: [lab-34-failures.md](docs/labs/lab-34-failures.md), row 32).
+- **Free-tier Gemini is flaky.** A stream can fail mid-answer (429 quota, 503 overload). The server classifies the error,
+  retries the stream once on its own (the client drops the partial text) and then shows a specific message; what really
+  fails is counted in `GET /admin/stats` (`llm_errors_by_class`). A second failure still ends in an error with a
+  "Try again" button. Design: [ADR 0008](docs/decisions/0008-llm-resilience.md).
+- **Flashcards were broken for everyone (fixed).** The OpenAPI `examples` on the flashcard model made the Gemini SDK
+  reject the request locally; fixed in `llm/gemini.py` (row 34 of [lab-34-failures.md](docs/labs/lab-34-failures.md)).
 - Failure behaviour (offline, cold start, 429, cut streams, weird input): [docs/labs/lab-34-failures.md](docs/labs/lab-34-failures.md).
 
 ## Privacy and ethics
