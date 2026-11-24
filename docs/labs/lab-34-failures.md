@@ -37,6 +37,8 @@ Tests named in the last column pin the behaviour (`backend/tests/…`, `frontend
 | 29 | **Telegram: `/cards` with nothing to learn from** (no answer yet, new chat, or the last answer was a refusal) | A one-line hint instead of an error or a wasted LLM call. | fixed | `test_telegram.py::test_cards_before_any_question`, `test_cards_after_a_refusal_say_there_is_nothing_to_learn` |
 | 30 | **Telegram: the bot crashes inside the background task**, or Telegram refuses our reply (the user blocked the bot) | The app keeps running; the person gets one calm sentence if Telegram accepts it. The log has the exception type and frames, not its message. | fixed | `test_telegram.py::test_a_crash_in_the_background_task_does_not_crash_the_app`, `test_a_failing_send_is_swallowed` |
 | 31 | **Telegram: webhook registration fails at startup** (Telegram down, wrong token) | The app starts normally; one log line, never with the token or the URL. | fixed | `test_telegram.py::test_a_failing_webhook_registration_does_not_stop_the_app` |
+| 32 | **Telegram: `/cards` in a real chat answers "The model couldn't make flashcards"** | The 502 sentence (`ERR_CARDS`). Observed once by the student in a real chat; no live API in the M1-of-lab-42 session, so not reproduced. | open (known issue) | none: see the note below |
+| 33 | **Free Render (512 MB): out-of-memory restart on the first Telegram message during a cold start** | The first reply is late or missing; Telegram retries and duplicates are dropped (row 21). Observed once, not measured. | open (known issue) | none |
 
 ## Not covered (known, honest)
 
@@ -44,3 +46,14 @@ Tests named in the last column pin the behaviour (`backend/tests/…`, `frontend
 - There is no client-side timeout: a request to a sleeping server waits until it wakes (the banner explains why).
 - Row 3: the banner is verified by unit tests of the timer logic, not in a real browser in M1.
 - A 429 from the *service-wide* LLM budget and from the per-IP limit look the same to the user; both carry a `Retry-After`.
+
+## Note on row 32 (`/cards` in Telegram), code reading only
+
+Read on 2026-11-24 without a live API. The bot's `_cards` loads the last assistant message of the chat, refuses politely if it has no
+sources, then calls `answering.make_flashcards`: the same function `POST /flashcards` uses. The 502 sentence is shown only when that
+function raises 502, that is when the Gemini call fails, times out or returns JSON that fails Pydantic validation twice. All three are
+logged on the server (`flashcards: LLM call failed` with the exception, or a `llm_calls` row with a failed status) but the user text
+is generic, so the cause cannot be told from the chat. Candidates, none confirmed: the free Gemini quota (a question and `/cards`
+right after it are two calls in a few seconds), a model/schema problem that only shows up for some answers, or the timeout on a
+cold instance. Not fixed because nothing in the code points to one cause. First step for the next session: read the Render log
+line and the last failed `llm_calls` row right after a failing `/cards`.

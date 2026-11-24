@@ -1,22 +1,94 @@
 # Mnemonic
 
-**Ask your notes. Get cited answers. Remember them.** An AI study assistant: pick a ready knowledge base or upload
-your own files, ask questions, and get answers that cite their sources (or honestly say "I don't know"), then turn
-them into flashcards.
+**Ask your notes. Get cited answers. Remember them.**
 
 [![CI](https://github.com/vandertal/mnemonic/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
-## Live
+**Try it:** [Web app](TODO_STUDENT) · [Telegram bot](TODO_STUDENT) · [API docs](https://mnemonic-y1js.onrender.com/docs) · [Health](https://mnemonic-y1js.onrender.com/health)
 
-- **App (SPA):** TODO_STUDENT: paste the live Cloudflare URL here (the page you open is the landing page; "Try it" leads to sign-up).
-- **API:** https://mnemonic-y1js.onrender.com · [docs](https://mnemonic-y1js.onrender.com/docs) · [health](https://mnemonic-y1js.onrender.com/health)
-- The API runs on Render's free plan and sleeps after 15 minutes idle: the first request can take up to a minute
-  (the app shows a "server is waking up" banner with a timer).
+<!-- TODO_STUDENT: replace both TODO_STUDENT links above: the live Cloudflare URL and https://t.me/<bot username> -->
+
+An AI study assistant: pick a ready knowledge base or upload your own files, ask questions, and get answers that cite
+their sources (or honestly say "I don't know"), then turn them into flashcards.
 
 ## Demo
 
-- TODO_STUDENT: link to the 60-second demo video (landing → sign-up → first cited answer → "Make flashcards").
+- TODO_STUDENT: link to the 60-120 second demo video (landing → sign-up → first cited answer → "Make flashcards"), embedded here.
 - TODO_STUDENT: live screenshots: `docs/screenshots/landing.png`, `docs/screenshots/chat.png` (take them on the deployed site, then embed them here).
+
+## The Manifesto (short)
+
+> **The Question.** Can a student trust an AI that explains their own notes, because every sentence of its answer can be
+> checked against the source?
+>
+> **The Answer.** `42`: a web app and a Telegram bot where every answer cites passages you can open, or says "not in your
+> materials". Live links are above.
+
+Full text: [MANIFESTO.md](MANIFESTO.md).
+
+## Quickstart (from a fresh clone)
+
+Needs Python 3.13 + [uv](https://docs.astral.sh/uv/), Node 22, and a Postgres with pgvector (a free Neon branch works).
+`LLM_PROVIDER=fake` needs no API key. More detail and every variable: [Run locally](#run-locally), [docs/SETUP.md](docs/SETUP.md).
+
+```powershell
+git clone https://github.com/vandertal/mnemonic.git ; cd mnemonic
+
+# backend
+cd backend
+Copy-Item .env.example .env              # fill in DATABASE_URL and JWT_SECRET
+uv sync
+uv run alembic upgrade head              # build the schema
+uv run python -m mnemonic.ingest         # optional: the shared FastAPI-docs knowledge base
+uv run fastapi dev src/mnemonic/main.py  # http://127.0.0.1:8000/docs
+
+# frontend (a second terminal, starting in the repo root)
+cd frontend
+Copy-Item .env.example .env              # VITE_API_URL = the backend above
+npm ci
+npm run dev                              # http://localhost:5173
+```
+
+Tests and lint: `uv run pytest ; uv run ruff check .` (backend), `npx tsc -b ; npx oxlint ; npm run test` (frontend).
+Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+  U["Browser"] -- "HTML/JS/CSS" --> CF["Cloudflare<br/>React SPA (static)"]
+  U -- "JSON / SSE<br/>Authorization: Bearer JWT" --> R["Render<br/>FastAPI (uvicorn)"]
+  R -- "SQL + vector search<br/>(psycopg, TLS)" --> N[("Neon<br/>Postgres + pgvector")]
+  R -- "prompt with retrieved chunks" --> G["Gemini API"]
+  GH["GitHub Actions CI"] -. "checks pass → deploy" .-> R
+```
+
+One request, end to end: the SPA sends `POST /sessions` with the Bearer token → FastAPI's `get_current_user`
+dependency verifies the JWT signature and expiry and loads the user → the route calls `PgStore.create_session`
+in a worker thread → one parameterised `INSERT ... RETURNING` → the row comes back as JSON with `201 Created`.
+
+> **Don't Panic**
+>
+> - **Cold start.** The API runs on Render's free plan and sleeps after 15 minutes idle: the first request can take
+>   up to a minute (the app shows a "server is waking up" banner with a timer; Telegram retries, duplicates are dropped).
+> - **512 MB memory limit** on the free plan. One out-of-memory restart was observed on the first Telegram message
+>   during a cold start ([failure audit](docs/labs/lab-34-failures.md)).
+> - **English questions work best.** The knowledge base and the embedder are English; a Ukrainian question may be refused.
+> - **Rate limits.** 10 requests/min per IP (5/min on `/auth/*`), a service-wide LLM budget (`GLOBAL_RPM`, 5 calls per
+>   minute on the free Gemini tier), and a per-person limit in Telegram. A busy answer comes with "try again in N s".
+
+## Which lab gave what
+
+| Lab | What it gave Mnemonic | Where |
+|---|---|---|
+| 31 · LLM RAG app | Chunking, embeddings, pgvector search, cited streaming answers, "I don't know" threshold (0.77), flashcards, eval set | [lab-31.md](docs/labs/lab-31.md), [ADR 0001](docs/decisions/0001-fastembed-over-sentence-transformers.md), [ADR 0002](docs/decisions/0002-gemini-model-choice.md) |
+| 22 · SPA frontend | React + TypeScript app: chat, documents, flashcard review, uk / en, themes; live on Cloudflare | [lab-22.md](docs/labs/lab-22.md), [frontend/](frontend/) |
+| 21 · REST API with auth | Accounts (argon2id, JWT), per-user data, Alembic migrations, integration tests, CI/CD to Render | [lab-21.md](docs/labs/lab-21.md), [ADR 0004](docs/decisions/0004-auth-and-migrations.md) |
+| 15 · Mini search engine | Own positional inverted index + BM25, hybrid retrieval with RRF, `/search`, "Why this result?" | [lab-15.md](docs/labs/lab-15.md), [ADR 0005](docs/decisions/0005-hybrid-retrieval.md) |
+| 34 · AI capstone | Landing page, onboarding, failure audit, one tracked metric, Telegram bot | [lab-34.md](docs/labs/lab-34.md), [ADR 0006](docs/decisions/0006-capstone-metrics.md), [ADR 0007](docs/decisions/0007-telegram-client.md) |
+
+Lab 33 (object detection) was swapped for lab 15; its plan is archived in [docs/labs/lab-33.md](docs/labs/lab-33.md).
+Retrospective: [docs/RETRO.md](docs/RETRO.md). Lab 42 checklist: [docs/labs/lab-42.md](docs/labs/lab-42.md).
 
 ## Who it is for and the problem
 
@@ -65,21 +137,6 @@ are one tap away. More: [docs/PRODUCT.md](docs/PRODUCT.md).
 | SPA | React 19.3, TypeScript 7.0, Vite 8.3, TanStack Query 5, Tailwind 4, i18next (uk / en) |
 | Quality | ruff, pytest (unit + real-Postgres integration), vitest, oxlint, GitHub Actions |
 | Hosting | API on Render (free), SPA on Cloudflare, database on Neon |
-
-## Architecture
-
-```mermaid
-flowchart LR
-  U["Browser"] -- "HTML/JS/CSS" --> CF["Cloudflare<br/>React SPA (static)"]
-  U -- "JSON / SSE<br/>Authorization: Bearer JWT" --> R["Render<br/>FastAPI (uvicorn)"]
-  R -- "SQL + vector search<br/>(psycopg, TLS)" --> N[("Neon<br/>Postgres + pgvector")]
-  R -- "prompt with retrieved chunks" --> G["Gemini API"]
-  GH["GitHub Actions CI"] -. "checks pass → deploy" .-> R
-```
-
-One request, end to end: the SPA sends `POST /sessions` with the Bearer token → FastAPI's `get_current_user`
-dependency verifies the JWT signature and expiry and loads the user → the route calls `PgStore.create_session`
-in a worker thread → one parameterised `INSERT ... RETURNING` → the row comes back as JSON with `201 Created`.
 
 ## What is "AI" about it
 
@@ -376,6 +433,12 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 - **Event counts start at the deploy of migration `0004`** and are per registered user; there are no page-view counts.
 - **The landing page and the failure banners were verified with unit tests of the markup and the timer logic, not
   yet in real browsers on real devices** (see [docs/labs/lab-34.md](docs/labs/lab-34.md)).
+- **Memory on the free Render plan (512 MB).** One out-of-memory restart was observed on the first Telegram message
+  during a cold start (the embedding model loads on the first question). Not reproduced or fixed; the memory numbers
+  above are local measurements, the Render ones are still to be read from Render Metrics.
+- **Telegram `/cards` is unreliable in a real chat (open bug).** In a real chat the bot answered that the model could not
+  make flashcards (the 502 sentence). The web's "Make flashcards" calls the same `make_flashcards` function, so the
+  difference is not in the logic; the cause is not found yet (details: [lab-34-failures.md](docs/labs/lab-34-failures.md), row 32).
 - Failure behaviour (offline, cold start, 429, cut streams, weird input): [docs/labs/lab-34-failures.md](docs/labs/lab-34-failures.md).
 
 ## Privacy and ethics
