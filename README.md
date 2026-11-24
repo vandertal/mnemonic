@@ -42,7 +42,7 @@ uv run alembic upgrade head              # build the schema
 uv run python -m mnemonic.ingest         # optional: the shared FastAPI-docs knowledge base
 uv run fastapi dev src/mnemonic/main.py  # http://127.0.0.1:8000/docs
 
-# frontend (second terminal, from the repo root)
+# frontend (a second terminal, starting in the repo root)
 cd frontend
 Copy-Item .env.example .env              # VITE_API_URL = the backend above
 npm ci

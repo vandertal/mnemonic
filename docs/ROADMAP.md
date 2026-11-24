@@ -23,7 +23,7 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 - [x] **15 — Mini Search Engine** · own inverted index → hybrid retrieval in the RAG; SPA search screen (code done; open: deploy + live smoke + screenshot, Reflection rewrite in own words, `git tag lab-15` on main)
 - [~] 33 — Object Detection & Tracking · replaced by 15 (plan archived in `docs/labs/lab-33.md`)
 - [~] 34 — AI Capstone · M1 and M5 done in code (landing, onboarding, failure audit, metric, README; Telegram bot); open: PRs merge, `uv add aiogram`, deploy + env vars, real users (M3), demo video, tag
-- [ ] 42 — Life, the Universe, and Everything · MANIFESTO, video, retro
+- [~] 42 — Life, the Universe, and Everything · M1 (paperwork) done: MANIFESTO draft, README top, RETRO draft, CONTRIBUTING, [lab-42.md](labs/lab-42.md); open: demo video, live URLs, real users, rewrite in own words, showcase post, tag
 
 ## Current lab
 
