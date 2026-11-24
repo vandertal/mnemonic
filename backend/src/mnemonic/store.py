@@ -70,6 +70,7 @@ class IndexRow:
 
 
 STATS_DAYS = 7
+CHANNELS = ("web", "telegram")
 DEFAULT_TITLE = "New chat"
 TITLE_FROM_MESSAGE_CHARS = 60
 
@@ -113,6 +114,17 @@ class Store(Protocol):
         ...
 
     def get_user(self, user_id: UUID) -> User | None: ...
+
+    def find_telegram_user(self, telegram_id: int) -> User | None:
+        """The Mnemonic user behind a Telegram id, or None if they never wrote to the bot."""
+        ...
+
+    def get_or_create_telegram_user(
+        self, telegram_id: int, password_hash: str
+    ) -> tuple[User, bool]:
+        """The user behind a Telegram id; the first call creates the user and the link. Safe under
+        concurrent first messages (one user, one link). Returns (user, created_by_this_call)."""
+        ...
 
     def delete_user(self, user_id: UUID) -> bool:
         """Delete the account; sessions, documents and chunks go with it (ON DELETE CASCADE)."""
@@ -192,6 +204,12 @@ class Store(Protocol):
         ...
 
 
+def telegram_email(telegram_id: int) -> str:
+    """The placeholder email of a Telegram user. `.invalid` is a reserved TLD: it can never be a
+    real mailbox, and nobody can sign in with it because the password hash is of a random secret."""
+    return f"tg-{telegram_id}@telegram.invalid"
+
+
 def first_line_title(content: str) -> str:
     """A chat title from its first message: whitespace collapsed, cut to 60 characters."""
     return " ".join(content.split())[:TITLE_FROM_MESSAGE_CHARS]
@@ -243,6 +261,40 @@ class PgStore:
                 "DELETE FROM users WHERE id = %s RETURNING id", (user_id,)
             ).fetchone()
         return row is not None
+
+    def find_telegram_user(self, telegram_id: int) -> User | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT u.id, u.email, u.created_at FROM telegram_accounts t "
+                "JOIN users u ON u.id = t.user_id WHERE t.telegram_id = %s",
+                (telegram_id,),
+            ).fetchone()
+        return None if row is None else User(*row)
+
+    def get_or_create_telegram_user(
+        self, telegram_id: int, password_hash: str
+    ) -> tuple[User, bool]:
+        with self._connect() as conn:  # one transaction: the user and the link exist together
+            # Serialise first messages of the SAME telegram id: the second waits here, then sees
+            # the link the first one committed. (Different ids do not block each other.)
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (telegram_id,))
+            found = conn.execute(
+                "SELECT u.id, u.email, u.created_at FROM telegram_accounts t "
+                "JOIN users u ON u.id = t.user_id WHERE t.telegram_id = %s",
+                (telegram_id,),
+            ).fetchone()
+            if found is not None:
+                return User(*found), False
+            row = conn.execute(
+                "INSERT INTO users (email, password_hash) VALUES (%s, %s) "
+                "RETURNING id, email, created_at",
+                (telegram_email(telegram_id), password_hash),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO telegram_accounts (telegram_id, user_id) VALUES (%s, %s)",
+                (telegram_id, row[0]),
+            )
+        return User(*row), True
 
     # Ownership is part of every query below (`AND user_id = %s`): we never fetch a row and compare
     # the owner in Python, so there is no code path that forgets the comparison.
@@ -480,6 +532,19 @@ class PgStore:
                 "WHERE created_at >= %s GROUP BY 1, 2",
                 (datetime(first.year, first.month, first.day, tzinfo=UTC),),
             ).fetchall()
+            by_channel = {
+                (channel, name): n
+                for channel, name, n in conn.execute(
+                    "SELECT COALESCE(props->>'channel', 'web'), name, count(*) FROM events "
+                    "GROUP BY 1, 2"
+                )
+            }
+            channel_users = dict(
+                conn.execute(
+                    "SELECT COALESCE(props->>'channel', 'web'), count(DISTINCT user_id) "
+                    "FROM events GROUP BY 1"
+                ).fetchall()
+            )
             (cited_users,) = conn.execute(
                 "SELECT count(DISTINCT user_id) FROM events "
                 "WHERE name = 'question_answered' AND props->>'cited' = 'true'"
@@ -504,6 +569,8 @@ class PgStore:
             calls,
             today,
             days,
+            by_channel,
+            channel_users,
         )
 
 
@@ -518,18 +585,28 @@ def assemble_stats(
     calls: int,
     today,
     days: int,
+    by_channel: dict[tuple[str, str], int] | None = None,
+    channel_users: dict[str, int] | None = None,
 ) -> dict:
     """The one place that shapes the numbers, shared by PgStore and the in-memory test store.
 
-    Main-action rate = registered users who got at least one CITED answer / registered users."""
+    Main-action rate = registered users who got at least one CITED answer / registered users.
+    `by_channel` is {(channel, event name): count}; an event without a `channel` prop is "web"."""
     names = ("signup", "question_answered", "cards_made", "search")
     last_days = []
     for back in range(days - 1, -1, -1):
         day = today - timedelta(days=back)
         counts = per_day.get(day, {})
         last_days.append({"date": day.isoformat(), **{n: counts.get(n, 0) for n in names}})
+    by_channel = by_channel or {}
+    channel_users = channel_users or {}
+    channels = {
+        c: {**{n: by_channel.get((c, n), 0) for n in names}, "users": channel_users.get(c, 0)}
+        for c in CHANNELS
+    }
     return {
         "totals": {n: totals.get(n, 0) for n in names},
+        "by_channel": channels,
         "distinct_users": distinct_users,
         "registered_users": registered,
         "last_days": last_days,
