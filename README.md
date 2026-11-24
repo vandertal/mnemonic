@@ -4,9 +4,8 @@
 
 [![CI](https://github.com/vandertal/mnemonic/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
-**Try it:** [Web app](TODO_STUDENT) · [Telegram bot](TODO_STUDENT) · [API docs](https://mnemonic-y1js.onrender.com/docs) · [Health](https://mnemonic-y1js.onrender.com/health)
+**Try it:** [Web app](https://mnemonic.vlad-slv.workers.dev) · [Telegram bot](https://t.me/mnemonicus_bot) · [API docs](https://mnemonic-y1js.onrender.com/docs) · [Health](https://mnemonic-y1js.onrender.com/health)
 
-<!-- TODO_STUDENT: replace both TODO_STUDENT links above: the live Cloudflare URL and https://t.me/<bot username> -->
 
 An AI study assistant: pick a ready knowledge base or upload your own files, ask questions, and get answers that cite
 their sources (or honestly say "I don't know"), then turn them into flashcards.
@@ -379,7 +378,7 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 
 ### Deployment checklist (lab 21 brief)
 
-- [ ] API live at a public URL — the lab-21 code is not deployed yet (`TODO_LIVE_URL`).
+- [x] API live at a public URL: https://mnemonic-y1js.onrender.com
 - [x] OpenAPI / Swagger UI at `/docs` (in code; live once deployed).
 - [x] `curl` examples in this README, including auth.
 - [x] Secrets (DB URL, JWT secret) only in environment variables, not in code.
