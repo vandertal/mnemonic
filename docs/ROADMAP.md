@@ -1,6 +1,6 @@
 # Roadmap
 
-Track: **31 → 22 → 21 → 33 → 34 → 42** (Track B + SPA, swap 32 → 21 — confirmed).
+Track: **31 → 22 → 21 → 15 → 34 → 42** (Track B + SPA; swaps: 32 → 21 confirmed, 33 → 15 on 2026-11-24 — confirm with the instructor).
 
 Target: **Standard** in every lab, **Advanced** where time allows.
 Lab briefs: `../Programming-Practice-Projects/labs/`.
@@ -19,11 +19,12 @@ Lab briefs: `../Programming-Practice-Projects/labs/`.
 - [x] 0. Setup — tools, repository, CLAUDE.md, docs
 - [x] 31 — LLM RAG App · core: chat over documents with citations (Standard + Advanced; open: 5+ real users, hard billing limit, Ollama deferred)
 - [x] 22 — SPA Frontend · chat, documents, flashcards, uk/en, themes; live on Cloudflare; Lighthouse ≥90 (open: Reflection rewrite in own words, 60s recording, Cmd+K skipped)
-- [ ] **21 — REST API With Auth** · accounts, tests, CI/CD ← **code done, deploy + tag pending** (branch `lab-21`; open: vitest install, first CI run, Render deploy, Reflection rewrite)
-- [ ] 33 — Object Detection & Tracking · image flashcards
+- [x] 21 — REST API With Auth · accounts, tests, CI/CD; deployed, live smoke 6/6 (open: `git tag lab-21` on main, TODO_LIVE_URL in README, Reflection rewrite)
+- [x] **15 — Mini Search Engine** · own inverted index → hybrid retrieval in the RAG; SPA search screen (code done; open: deploy + live smoke + screenshot, Reflection rewrite in own words, `git tag lab-15` on main)
+- [~] 33 — Object Detection & Tracking · replaced by 15 (plan archived in `docs/labs/lab-33.md`)
 - [ ] 34 — AI Capstone · real users, landing, metrics
 - [ ] 42 — Life, the Universe, and Everything · MANIFESTO, video, retro
 
 ## Current lab
 
-**Lab 21 — code done, deploy + tag pending.** Plan: [`docs/labs/lab-21.md`](labs/lab-21.md). Lab 22 closed (2026-11-21), tag `lab-22`.
+**Lab 15 — code done (M1–M3).** Left for the developer: PR + green CI, deploy, the deployment checklist in [`docs/labs/lab-15.md`](labs/lab-15.md), Reflection rewrite, tag. Prompts: `docs/prompts/lab15-m2.md`, `lab15-m3.md` (done).

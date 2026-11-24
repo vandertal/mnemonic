@@ -68,6 +68,8 @@ and only sees the rows of that account. Someone else's id answers **404**, like 
 | GET / POST | `/documents` | list / upload (.md, .txt, .pdf) |
 | DELETE | `/documents/{id}` | 204 |
 | GET | `/chunks/{id}` | text behind a citation |
+| GET | `/search` | `?q=&limit=10&mode=all\|any&ranker=bm25\|tfidf` -> ranked chunks, snippet + highlight offsets (owner-scoped, per-IP limit) |
+| GET | `/search/explain` | `?q=&chunk_id=` -> per-term tf, df, idf, contribution (404 for a foreign chunk) |
 | GET | `/health` | liveness, no auth, no database |
 
 Every request is logged as one JSON line on the `mnemonic.access` logger (no headers, query strings or bodies).
@@ -93,3 +95,36 @@ uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 Try it in `/docs` (Authorize), or against a running server:
 `uv run python scripts/auth_smoke.py http://127.0.0.1:8000`.
+
+## Search engine (lab 15)
+
+`src/mnemonic/search/` is a hand-written search engine: stdlib only, no FastAPI or database imports.
+Positional inverted index, code-aware tokenizer (`response_model` is indexed whole and as parts),
+BM25 (default) and TF-IDF, queries `foo bar`, `"exact phrase"`, `-word`, snippets with highlight
+offsets, `explain`, versioned JSON save/load.
+
+```powershell
+uv run python scripts/search_cli.py                 # interactive, over the FastAPI docs
+uv run python scripts/search_cli.py --bench         # index time, size, p50/p95 latency
+uv run python scripts/search_cli.py --explain 1     # per-term tf, df, idf, contribution of hit 1
+```
+
+### Hybrid retrieval in the app (M2)
+
+The index is built from all chunks in the DB at startup (worker thread; one JSON log line with
+chunks, terms, seconds, memory) and updated on every upload / delete / account deletion. Chat
+retrieval is set by `RETRIEVAL_MODE` in `.env`:
+
+| value | behaviour |
+|---|---|
+| `hybrid` (default) | RRF (k=60) of pgvector top-N and BM25 top-N; "I don't know" gate = vector similarity OR a lexical match on a short query |
+| `vector` | pgvector only, exactly the behaviour before lab 15 (the rollback switch) |
+| `bm25` | the lexical index only |
+
+Before the index is ready chat uses vector search and `/search` answers 503. One process only
+(see `docs/decisions/0005-hybrid-retrieval.md`). Compare the modes (no LLM calls, uses the dev DB):
+`uv run python eval/retrieval_ablation.py` -> `docs/labs/lab-15-eval.md`. Live smoke (two accounts):
+`uv run python scripts/search_smoke.py http://127.0.0.1:8000`.
+
+The docs folder is the one `python -m mnemonic.ingest` clones (`data/fastapi/docs/en/docs`);
+use `--dir` for any folder of `.md`/`.txt` files.

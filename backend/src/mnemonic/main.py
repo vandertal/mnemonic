@@ -34,8 +34,9 @@ from mnemonic.rag import (
     select_history,
     valid_citations,
 )
-from mnemonic.retrieval import Hit, PgRetriever, Retriever
+from mnemonic.retrieval import Hit, PgRetriever, Retriever, is_answerable
 from mnemonic.routes_auth import router as auth_router
+from mnemonic.routes_search import router as search_router
 from mnemonic.routes_sessions import router as sessions_router
 from mnemonic.schemas import (
     ChatRequest,
@@ -48,6 +49,11 @@ from mnemonic.schemas import (
     Message,
     ToolCall,
 )
+from mnemonic.search_service import (
+    SearchService,
+    build_from_store,
+    get_search_service,
+)
 from mnemonic.security import (
     BUSY_MESSAGE,
     get_global_limiter,
@@ -55,6 +61,7 @@ from mnemonic.security import (
     spend_llm_budget,
 )
 from mnemonic.store import (
+    IndexRow,
     LLMCall,
     SessionNotFound,
     Store,
@@ -82,7 +89,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "(see backend/.env.example)"
         )
     logger.info("LLM provider: %s", describe_provider(settings))
-    yield
+    # The index is built in a worker thread and the app starts serving at once: until it is ready
+    # chat falls back to vector search and /search answers 503 (Retry-After).
+    service = app.dependency_overrides.get(get_search_service, get_search_service)()
+    store = app.dependency_overrides.get(get_store, get_store)()
+    build = asyncio.create_task(asyncio.to_thread(build_from_store, service, store))
+    try:
+        yield
+    finally:
+        await build  # build_from_store never raises; a thread cannot be cancelled anyway
 
 
 app = FastAPI(
@@ -104,6 +119,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(sessions_router)
+app.include_router(search_router)
 
 access_log = logging.getLogger("mnemonic.access")
 
@@ -147,7 +163,13 @@ def get_provider() -> LLMProvider:
 @lru_cache
 def get_retriever() -> Retriever:
     settings = get_settings()
-    return PgRetriever(settings.database_url, settings.retrieval_top_k)
+    return PgRetriever(
+        settings.database_url,
+        settings.retrieval_top_k,
+        settings.retrieval_mode,
+        get_search_service(),
+        settings.retrieval_candidates,
+    )
 
 
 # Real models in production; tests override both, so they never load a model or touch the network.
@@ -373,10 +395,10 @@ async def chat(
         raise HTTPException(status_code=404, detail="Session not found")
     # Embedding + DB query are blocking: keep them off the event loop.
     hits = await asyncio.to_thread(retriever, request.message, user.id)
-    best = hits[0].similarity if hits else 0.0
+    best = max((h.similarity for h in hits), default=0.0)
     logger.info("retrieval: %d hits, top similarity %.3f", len(hits), best)
 
-    refuse = not hits or best < settings.similarity_threshold
+    refuse = not is_answerable(hits, settings.similarity_threshold, settings.retrieval_mode)
     if not refuse:
         # Only a real LLM call spends the service-wide budget: "I don't know" is free.
         # Raised before anything is saved or streamed, so the client can simply retry.
@@ -537,6 +559,7 @@ async def upload_document(
     store: Annotated[Store, Depends(get_store)],
     embedder: Annotated[Callable[[list[str]], Sequence[np.ndarray]], Depends(get_embedder)],
     tokenizer: Annotated[Callable[[], Tokenizer], Depends(get_chunk_tokenizer)],
+    search: Annotated[SearchService, Depends(get_search_service)],
 ) -> dict:
     owner_id = user.id
     limit = settings.max_upload_bytes
@@ -564,9 +587,24 @@ async def upload_document(
             return chunks, embedder([c.content for c in chunks])
 
         chunks, vectors = await asyncio.to_thread(prepare)
-        doc = await asyncio.to_thread(
-            store.add_document, owner_id, name, chunks, vectors, settings.max_documents_per_owner
-        )
+
+        def save() -> StoredDocument:
+            # The DB write and the index update are ONE code path: the index is touched only
+            # after the commit succeeded (an exception above leaves it alone), so a request never
+            # leaves a searchable chunk that is not in the DB.
+            stored = store.add_document(
+                owner_id, name, chunks, vectors, settings.max_documents_per_owner
+            )
+            try:
+                search.add_chunks(
+                    IndexRow(cid, owner_id, c.heading, c.content)
+                    for cid, c in zip(stored.chunk_ids, chunks, strict=True)
+                )
+            except Exception:  # the document IS stored: keep the upload, fix the index on restart
+                logger.exception("search index update failed after upload; restart rebuilds it")
+            return stored
+
+        doc = await asyncio.to_thread(save)
     except DocumentError as e:
         raise HTTPException(status_code=e.status, detail=e.detail) from None
     except TooManyDocuments:
@@ -606,8 +644,16 @@ async def delete_document(
     document_id: Annotated[int, PathParam(ge=1, le=2**63 - 1)],
     user: Annotated[User, Depends(get_current_user)],
     store: Annotated[Store, Depends(get_store)],
+    search: Annotated[SearchService, Depends(get_search_service)],
 ) -> Response:
-    if not await asyncio.to_thread(store.delete_document, user.id, document_id):
+    def remove() -> bool:
+        deleted = store.delete_document(user.id, document_id)  # chunk ids, None if not theirs
+        if deleted is None:
+            return False
+        search.remove_chunks(deleted)  # only after the DB delete succeeded
+        return True
+
+    if not await asyncio.to_thread(remove):
         raise HTTPException(status_code=404, detail="Document not found")
     return Response(status_code=204)
 

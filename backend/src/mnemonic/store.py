@@ -55,6 +55,18 @@ class StoredDocument:
     filename: str
     created_at: datetime
     chunks: int
+    # ids of the chunks just stored (filled by add_document only; the search index needs them)
+    chunk_ids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class IndexRow:
+    """What the search index needs of a chunk. `owner_id` None = shared knowledge base."""
+
+    id: int
+    owner_id: UUID | None
+    heading: str
+    content: str
 
 
 DEFAULT_TITLE = "New chat"
@@ -157,8 +169,17 @@ class Store(Protocol):
         """Store a document with its chunks atomically; raises TooManyDocuments at the limit."""
         ...
 
-    def delete_document(self, owner_id: UUID, document_id: int) -> bool:
-        """Delete the owner's document and its chunks. False if it is not theirs / not there."""
+    def delete_document(self, owner_id: UUID, document_id: int) -> list[int] | None:
+        """Delete the owner's document and its chunks; returns the deleted chunk ids, or None if
+        the document is not theirs / not there."""
+        ...
+
+    def owned_chunk_ids(self, owner_id: UUID) -> list[int]:
+        """Ids of the chunks that belong to this owner's documents (not the shared ones)."""
+        ...
+
+    def index_rows(self) -> list[IndexRow]:
+        """Every chunk (shared and owned): the input of the startup index build."""
         ...
 
 
@@ -374,16 +395,41 @@ class PgStore:
                         for c, v in zip(chunks, vectors, strict=True)
                     ],
                 )
-        return StoredDocument(doc_id, filename, created_at, len(chunks))
+            chunk_ids = tuple(
+                r[0]
+                for r in conn.execute(
+                    "SELECT id FROM chunks WHERE document_id = %s ORDER BY chunk_index, id",
+                    (doc_id,),
+                )
+            )
+        return StoredDocument(doc_id, filename, created_at, len(chunks), chunk_ids)
 
-    def delete_document(self, owner_id: UUID, document_id: int) -> bool:
-        with self._connect() as conn:
+    def delete_document(self, owner_id: UUID, document_id: int) -> list[int] | None:
+        with self._connect() as conn:  # one transaction: the ids read and the delete agree
+            ids = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT c.id FROM chunks c JOIN documents d ON d.id = c.document_id "
+                    "WHERE d.id = %s AND d.owner_id = %s",
+                    (document_id, owner_id),
+                )
+            ]
             # The chunks go with it: chunks.document_id is ON DELETE CASCADE.
             row = conn.execute(
                 "DELETE FROM documents WHERE id = %s AND owner_id = %s RETURNING id",
                 (document_id, owner_id),
             ).fetchone()
-        return row is not None
+        return None if row is None else ids
+
+    def owned_chunk_ids(self, owner_id: UUID) -> list[int]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id FROM chunks WHERE owner_id = %s", (owner_id,)).fetchall()
+        return [r[0] for r in rows]
+
+    def index_rows(self) -> list[IndexRow]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id, owner_id, heading, content FROM chunks").fetchall()
+        return [IndexRow(*row) for row in rows]
 
     def log_llm_call(self, call: LLMCall) -> None:
         with self._connect() as conn:

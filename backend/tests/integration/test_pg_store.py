@@ -149,8 +149,8 @@ def test_documents_add_list_limit_delete(pg_store):
     assert [(d.filename, d.chunks) for d in listed] == [("a.md", 3), ("b.md", 1)]
     assert pg_store.count_documents(alice.id) == 2
     assert pg_store.list_documents(bob.id) == []
-    assert pg_store.delete_document(bob.id, first.id) is False  # not Bob's
-    assert pg_store.delete_document(alice.id, first.id) is True
+    assert pg_store.delete_document(bob.id, first.id) is None  # not Bob's
+    assert pg_store.delete_document(alice.id, first.id) == list(first.chunk_ids)
     assert [d.filename for d in pg_store.list_documents(alice.id)] == ["b.md"]
 
 

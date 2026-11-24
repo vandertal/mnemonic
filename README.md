@@ -182,6 +182,103 @@ All endpoints: [backend/README.md](backend/README.md#endpoints).
 | 429 | rate limit (per IP, stricter on `/auth/*`, or the service-wide LLM budget); see `Retry-After` |
 | 502 | the LLM failed or returned an invalid format (`/flashcards`) |
 
+## Search
+
+Keyword search over the knowledge base and your own documents, built by hand (lab 15): a **positional inverted
+index** (`term → {chunk → positions}`) ranked with **BM25** (TF-IDF is kept as a baseline), pure Python standard
+library, in [backend/src/mnemonic/search/](backend/src/mnemonic/search/). It does two jobs:
+
+- **`GET /search`** and the SPA **Search** screen: ranked chunks, a snippet with highlighted words, matched-term
+  chips, and a **"Why this result?"** table (tf, df, idf, contribution per query word) from `GET /search/explain`.
+- **Hybrid retrieval in the chat**: the BM25 top-20 is fused with the pgvector top-20 by Reciprocal Rank Fusion, and
+  a lexical "I don't know" gate lets short keyword questions (`CORS`, `Depends`) through. Decision record:
+  [docs/decisions/0005-hybrid-retrieval.md](docs/decisions/0005-hybrid-retrieval.md).
+
+![Search screen](docs/screenshots/search.png)
+
+<!-- TODO: save a screenshot of the Search screen (query "Depends", one "Why this result?" open) as docs/screenshots/search.png -->
+
+```mermaid
+flowchart LR
+  Q["query"] --> T["tokenizer<br/>(casefold, code-aware, stop words)"]
+  T --> B["BM25 over the inverted index<br/>top-20, only chunks the user may see"]
+  Q --> E["embedding"] --> V["pgvector cosine<br/>top-20"]
+  B --> F["RRF fusion (k = 60)"]
+  V --> F
+  F --> G{"answer gate<br/>cosine >= 0.77<br/>OR a chunk has every rare term"}
+  G -- "yes" --> R["top-5 chunks → LLM with citations"]
+  G -- "no" --> D["“I don't know”, no LLM call"]
+```
+
+`GET /search` itself uses only the BM25 half (no embedding, no LLM, so it costs nothing and answers in a few ms).
+
+### Numbers
+
+| What | Value |
+|---|---|
+| Corpus A: FastAPI docs as 159 files (`search_cli.py --bench`) | build 3.4 s, 12 110 terms, 1.43 MB as JSON |
+| Query latency on corpus A (20 queries) | `mode=all` p50 1.1 ms / p95 4.3 ms · `mode=any` p50 0.7 ms / p95 2.7 ms |
+| Corpus B: 2203 chunks in the app (startup build, ADR 0005) | build about 2.5 s, about 27 MB of Python objects (`tracemalloc`) |
+| Render memory before / after the index | *fill in after the deploy (startup log line + Render Metrics)* |
+
+Reproduce: `cd backend; uv run python scripts/search_cli.py --bench`. Windows laptop numbers, not Render's.
+
+Retrieval ablation on corpus B (retrieval only, no LLM; details in [docs/labs/lab-15-eval.md](docs/labs/lab-15-eval.md)):
+
+| config | original questions (7) | short keyword queries answered (10) | off-topic refused (10) | `python` alone |
+|---|---|---|---|---|
+| vector only (the old behaviour) | 7/7 | 6/10 | 10/10 | refused |
+| BM25 only | 6/7 | 10/10 | 10/10 | answered |
+| hybrid, gate a (cosine only) | 7/7 | 6/10 | 10/10 | refused |
+| hybrid, gate b (any full lexical match) | 7/7 | 10/10 | 10/10 | answered |
+| **hybrid, gate c (chosen)** | **7/7** | **10/10** | **10/10** | refused |
+
+### Lexical vs semantic
+
+| | Lexical (BM25) | Semantic (embeddings) |
+|---|---|---|
+| Wins on | exact identifiers and rare words: `CORS`, `Depends`, `response_model` | paraphrase: "run something after I send the response" finds *background tasks* |
+| Fails on | no shared words, plurals (no stemming), synonyms | one-word queries (weak embedding), exact strings |
+| Cost | a dict lookup, a few ms, about 27 MB for 2203 chunks, nothing to train | a model in RAM, one embedding per query, a vector index |
+| Explainable | yes: every score is a sum of per-term numbers (the "why" table) | no: one cosine number |
+
+Neither is enough alone (BM25 alone missed 1 of 7 original questions; vector alone answered 6 of 10 keyword
+queries), so the chat uses both and RRF merges the two ranked lists without calibrating their scores.
+
+### Try it with curl
+
+```bash
+# $API and $AUTH as in "Try the API with curl" above
+curl -s "$API/search?q=Depends&limit=3" -H "$AUTH" | jq '.[0]'
+curl -s -G "$API/search" --data-urlencode 'q="dependency injection"' -d ranker=tfidf -d mode=all -H "$AUTH"
+curl -s -G "$API/search/explain" --data-urlencode 'q=Depends' -d chunk_id=42 -H "$AUTH" | jq    # chunk_id from /search
+```
+
+```powershell
+curl.exe -s "$API/search?q=Depends&limit=3" -H "Authorization: Bearer $TOKEN"
+curl.exe -s -G "$API/search/explain" --data-urlencode "q=Depends" -d chunk_id=42 -H "Authorization: Bearer $TOKEN"
+```
+
+Query syntax: `foo bar` (all words), `"exact phrase"`, `-excluded`; `mode=any` needs one word only. A search hit
+returns `snippet.text` plus `snippet.highlights` as `[start, end)` offsets in Unicode **code points**: the SPA converts
+them itself and renders `<mark>` elements, never HTML. Live check after a deploy:
+`uv run python scripts/search_smoke.py <API URL>`.
+
+### Limitations (honest)
+
+- **The "I don't know" gate is tuned on one corpus.** A term counts as rare if it is in at most 10 % of all chunks. That
+  number was chosen on the FastAPI docs (2203 chunks, 968 of them release notes) with the same small query set used to
+  pick it, so the evaluation is optimistic. On a tiny personal corpus (a few chunks) no term is below 10 %, so the
+  lexical gate almost never fires and the chat behaves like vector-only.
+- **English stop words only, no stemming**: `middlewares` does not match `middleware`; common Ukrainian words are
+  indexed like any other word, so Ukrainian notes are searchable but noisier.
+- **The index lives in the memory of one process** and is rebuilt on every restart (about 2.5 s here); until it is ready
+  `/search` answers 503 with `Retry-After` and the chat falls back to vector-only. Several workers would each keep their
+  own copy and miss each other's uploads.
+- **`python` alone is refused by design** (it is in 17 % of the chunks, so it proves nothing); the same holds for other
+  very common words.
+- The latency and memory numbers come from a developer laptop; the Render numbers are filled in after the deploy.
+
 ## Run locally
 
 Needs Python 3.13 + [uv](https://docs.astral.sh/uv/), Node 22, and a Postgres with pgvector (a free Neon branch

@@ -67,3 +67,22 @@ def search(
         """,
         (query_vec, owner_id, query_vec, k),
     ).fetchall()
+
+
+def fetch_by_ids(
+    conn: psycopg.Connection, query_vec: np.ndarray, ids: Sequence[int], owner_id: UUID | None
+) -> list[tuple]:
+    """The given chunks with their cosine similarity to the query: (id, similarity, file_path,
+    heading, content). The ownership filter is repeated here on purpose (defence in depth): an id
+    the caller may not see is simply absent, whatever the caller passed."""
+    return conn.execute(
+        """
+        SELECT id, 1 - (embedding <=> %s) AS similarity, file_path, heading, content
+        FROM chunks WHERE id = ANY(%s) AND (owner_id IS NULL OR owner_id = %s)
+        """,
+        (query_vec, list(ids), owner_id),
+    ).fetchall()
+
+
+def owned_chunk_ids(conn: psycopg.Connection, owner_id: UUID) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT id FROM chunks WHERE owner_id = %s", (owner_id,))]

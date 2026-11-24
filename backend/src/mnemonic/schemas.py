@@ -281,3 +281,79 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(description="Token lifetime in seconds.")
+
+
+class SnippetOut(BaseModel):
+    """Plain text plus highlight offsets INTO that text. Never HTML: the client draws the marks,
+    so nothing inside an uploaded document can inject markup."""
+
+    text: str
+    highlights: list[tuple[int, int]] = Field(
+        description="[start, end) character offsets of matched words inside `text`."
+    )
+
+
+class SearchHitOut(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "chunk_id": 42,
+                    "document": "tutorial/cors.md",
+                    "heading": "CORS (Cross-Origin Resource Sharing)",
+                    "score": 7.31,
+                    "snippet": {
+                        "text": "You can configure it in your FastAPI application using the "
+                        "CORSMiddleware.",
+                        "highlights": [[63, 75]],
+                    },
+                    "matched_terms": ["cors"],
+                }
+            ]
+        }
+    )
+
+    chunk_id: int
+    document: str = Field(description="The file the chunk comes from.")
+    heading: str
+    score: float = Field(
+        description="Ranker score; higher is better, not comparable across queries."
+    )
+    snippet: SnippetOut
+    matched_terms: list[str]
+
+
+class TermExplanationOut(BaseModel):
+    term: str
+    tf: int = Field(description="Times the term occurs in this chunk.")
+    df: int = Field(description="Chunks that contain the term.")
+    idf: float = Field(description="Rarity weight: higher for rarer terms.")
+    contribution: float = Field(description="What this term adds to the score.")
+
+
+class ExplainOut(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "chunk_id": 42,
+                    "document": "tutorial/cors.md",
+                    "ranker": "bm25",
+                    "n_docs": 1523,
+                    "avgdl": 118.4,
+                    "doc_length": 96,
+                    "terms": [{"term": "cors", "tf": 4, "df": 9, "idf": 5.1, "contribution": 7.31}],
+                    "score": 7.31,
+                }
+            ]
+        }
+    )
+
+    chunk_id: int
+    document: str
+    ranker: Literal["bm25", "tfidf"]
+    n_docs: int = Field(description="Chunks in the index.")
+    avgdl: float = Field(description="Average chunk length in indexed words.")
+    doc_length: int = Field(description="Length of this chunk in indexed words.")
+    terms: list[TermExplanationOut]
+    score: float = Field(description="Sum of the contributions.")
