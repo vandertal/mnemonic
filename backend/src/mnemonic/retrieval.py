@@ -148,17 +148,17 @@ class HybridRetriever:
         mode: str = "hybrid",
         search: SearchService | None = None,
         candidates: int = 20,
-        embed: Callable[[str], np.ndarray] = embed_query,
+        embed: Callable[[str], np.ndarray] | None = None,
     ) -> None:
         self._source = source
         self._k = k
         self._mode = mode
         self._search = search
         self._candidates = max(candidates, k)
-        self._embed = embed
+        self._embed = embed  # None = embed_query, looked up at call time (patchable in tests)
 
     def __call__(self, question: str, owner_id: UUID | None = None) -> list[Hit]:
-        qvec = self._embed(question)
+        qvec = (self._embed or embed_query)(question)
         search = self._search
         lexical = self._mode != "vector" and search is not None and search.ready
         with self._source.session() as src:
