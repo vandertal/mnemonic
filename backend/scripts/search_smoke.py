@@ -1,6 +1,7 @@
 """Smoke test of /search and /search/explain against a running server (not run by CI).
 
-Usage (from backend/):  uv run python scripts/search_smoke.py http://127.0.0.1:8000 [REGISTRATION_CODE]
+Usage (from backend/):
+    uv run python scripts/search_smoke.py http://127.0.0.1:8000 [REGISTRATION_CODE]
 Registers TWO accounts (A and B): /auth/* allows 5 requests per minute per IP, and this uses 4
 (2 registers + 2 logins). Wait a minute between runs. Prints PASS/FAIL per step; exit 1 on a FAIL.
 Needs the shared knowledge base to be loaded (the last step searches for `Depends`).
