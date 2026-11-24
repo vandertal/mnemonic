@@ -96,6 +96,20 @@ describe('429 and 422 from the API client', () => {
     expect(onAuthFailure).toHaveBeenCalledTimes(1)
   })
 
+  it('a late 401 for an OLD token does not log out the new session', async () => {
+    const onAuthFailure = vi.fn()
+    setAuthFailureHandler(onAuthFailure)
+    vi.mocked(storage.clearToken).mockClear()
+    // The request leaves with token-123; while it is in flight the user registers again and the
+    // stored token becomes a new one. The old request then comes back 401.
+    vi.mocked(storage.getToken).mockReturnValueOnce('old-token').mockReturnValue('new-token')
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ detail: 'Invalid or expired token' }, { status: 401 })))
+    await apiFetch('/sessions').catch(() => {})
+    expect(storage.clearToken).not.toHaveBeenCalled()
+    expect(onAuthFailure).not.toHaveBeenCalled()
+    vi.mocked(storage.getToken).mockReturnValue('token-123')
+  })
+
   it('a wrong password on login (skipAuthFailure) does not log anyone out', async () => {
     const onAuthFailure = vi.fn()
     setAuthFailureHandler(onAuthFailure)

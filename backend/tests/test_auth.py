@@ -201,3 +201,29 @@ def test_app_refuses_to_start_without_a_strong_jwt_secret(store, secret):
     app.dependency_overrides[get_settings] = lambda: settings(jwt_secret=secret)
     with pytest.raises(RuntimeError, match="JWT_SECRET"), TestClient(app):
         pass
+
+
+def test_register_delete_register_the_same_email_then_login(store):
+    """The reported flow: after DELETE /auth/me the same email works again, and the old token
+    does not."""
+    app.dependency_overrides[get_auth_limiter] = lambda: SlidingWindowLimiter(100)
+    with make_client(store) as client:
+        assert register(client).status_code == 201
+        old = login(client).json()["access_token"]
+        assert (
+            client.delete("/auth/me", headers={"Authorization": f"Bearer {old}"}).status_code == 204
+        )
+
+        assert client.get("/auth/me", headers={"Authorization": f"Bearer {old}"}).status_code == 401
+        assert login(client).status_code == 401  # the account is gone
+
+        assert register(client).status_code == 201  # same email, no 409
+        new = login(client)
+        assert new.status_code == 200
+        token = new.json()["access_token"]
+        assert (
+            client.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).json()["email"]
+            == EMAIL
+        )
+        # The deleted account's token must not work for the new account (different user id).
+        assert client.get("/auth/me", headers={"Authorization": f"Bearer {old}"}).status_code == 401

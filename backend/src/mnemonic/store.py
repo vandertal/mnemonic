@@ -35,6 +35,7 @@ class LLMCall:
     cost_usd: float
     latency_ms: int
     status: str
+    error_class: str | None = None  # quota / overloaded / ...: only for failed calls
 
 
 @dataclass(frozen=True)
@@ -503,8 +504,9 @@ class PgStore:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO llm_calls "
-                "(session_id, model, tokens_in, tokens_out, cost_usd, latency_ms, status) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                "(session_id, model, tokens_in, tokens_out, cost_usd, latency_ms, status, "
+                "error_class) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     call.session_id,
                     call.model,
@@ -513,6 +515,7 @@ class PgStore:
                     call.cost_usd,
                     call.latency_ms,
                     call.status,
+                    call.error_class,
                 ),
             )
 
@@ -555,6 +558,13 @@ class PgStore:
             cost, calls = conn.execute(
                 "SELECT COALESCE(sum(cost_usd), 0)::float8, count(*) FROM llm_calls"
             ).fetchone()
+            errors = dict(
+                conn.execute(
+                    "SELECT error_class, count(*) FROM llm_calls WHERE error_class IS NOT NULL "
+                    "AND created_at >= %s GROUP BY 1",
+                    (datetime(first.year, first.month, first.day, tzinfo=UTC),),
+                ).fetchall()
+            )
         per_day: dict = {}
         for day, name, n in daily:
             per_day.setdefault(day, {})[name] = n
@@ -571,6 +581,7 @@ class PgStore:
             days,
             by_channel,
             channel_users,
+            errors,
         )
 
 
@@ -587,6 +598,7 @@ def assemble_stats(
     days: int,
     by_channel: dict[tuple[str, str], int] | None = None,
     channel_users: dict[str, int] | None = None,
+    llm_errors: dict[str, int] | None = None,
 ) -> dict:
     """The one place that shapes the numbers, shared by PgStore and the in-memory test store.
 
@@ -616,6 +628,8 @@ def assemble_stats(
             "users": cited_users,
             "rate": round(cited_users / registered, 3) if registered else 0.0,
         },
+        # Failed LLM calls of the last `days` days by class (quota, overloaded, ...): what fails.
+        "llm_errors_by_class": dict(sorted((llm_errors or {}).items())),
         "llm_cost": {
             "total_usd": round(cost, 6),
             "calls": calls,

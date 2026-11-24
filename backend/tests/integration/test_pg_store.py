@@ -250,3 +250,33 @@ def test_deleting_an_account_cascades_to_everything_it_owns(pg_store, pg_url):
     assert count(pg_url, "SELECT count(*) FROM llm_calls") == 1
     # The shared knowledge base is nobody's, so it stays.
     assert count(pg_url, "SELECT count(*) FROM chunks WHERE id = %s", shared) == 1
+
+
+def test_every_foreign_key_to_users_cascades_or_nulls(pg_url):
+    """A new table that references users without ON DELETE would make DELETE /auth/me fail with
+    a foreign-key error. confdeltype: c = CASCADE, n = SET NULL."""
+    rules = (
+        psycopg.connect(pg_url)
+        .execute(
+            "SELECT conrelid::regclass::text, confdeltype FROM pg_constraint "
+            "WHERE contype = 'f' AND confrelid = 'users'::regclass"
+        )
+        .fetchall()
+    )
+    assert rules, "expected foreign keys to users"
+    assert {table for table, rule in rules if rule not in ("c", "n")} == set()
+    tables = {table for table, _ in rules}
+    assert {"sessions", "documents", "chunks", "events", "telegram_accounts"} <= tables
+
+
+def test_the_same_email_can_register_again_after_the_account_was_deleted(pg_store):
+    first = pg_store.create_user("again@example.com", "hash-1")
+    session = pg_store.create_session(first.id)
+    pg_store.add_message(first.id, session.id, "user", "hi")
+    assert pg_store.delete_user(first.id) is True
+    assert pg_store.get_user_by_email("again@example.com") is None
+
+    second = pg_store.create_user("again@example.com", "hash-2")  # no EmailTaken
+    assert second.id != first.id
+    found = pg_store.get_user_by_email("again@example.com")
+    assert found is not None and found[1] == "hash-2"

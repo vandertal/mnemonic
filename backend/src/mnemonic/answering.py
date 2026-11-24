@@ -21,8 +21,11 @@ from fastapi import HTTPException
 
 from mnemonic import events as metrics
 from mnemonic.config import Settings, get_settings
+from mnemonic.language import is_non_english
 from mnemonic.limits import SlidingWindowLimiter
-from mnemonic.llm.base import InvalidLLMOutput, LLMProvider, Usage
+from mnemonic.llm import errors as llm_errors
+from mnemonic.llm import retry as llm_retry
+from mnemonic.llm.base import LLMProvider, Usage
 from mnemonic.llm.factory import build_provider, model_name
 from mnemonic.llm.retry import call_with_retry, stream_with_retry
 from mnemonic.rag import (
@@ -79,13 +82,23 @@ async def save_message(
     return await asyncio.to_thread(store.add_message, user_id, session_id, role, content, sources)
 
 
+NON_ENGLISH = "non_english"  # the refusal reason for a question that is not in English
+
+
 async def refusal_stream(
-    store: Store, user_id: UUID, session_id: UUID, channel: Channel = None
+    store: Store,
+    user_id: UUID,
+    session_id: UUID,
+    channel: Channel = None,
+    reason: str | None = None,
 ) -> AsyncIterator[str]:
     yield sse(REFUSAL)
+    if reason:  # lets a client show a specific hint instead of the generic one
+        yield sse({"reason": reason}, event="refusal")
     message_id = await save_message(store, user_id, session_id, "assistant", REFUSAL, [])
+    props = {"reason": reason} if reason else {}
     await metrics.emit(
-        store, metrics.QUESTION_ANSWERED, user_id, channel, cited=False, refused=True
+        store, metrics.QUESTION_ANSWERED, user_id, channel, cited=False, refused=True, **props
     )
     yield sse({"message_id": message_id}, event="done")
 
@@ -100,6 +113,7 @@ async def log_llm_call(
     retries: int,
     latency_ms: int,
     ok: bool,
+    error_class: str | None = None,
 ) -> None:
     """Write one row to llm_calls. Never raises: a broken log must not break the answer."""
     # Providers report real token counts; if one did not, estimate: ~4 characters per token.
@@ -118,6 +132,7 @@ async def log_llm_call(
         cost_usd=cost,
         latency_ms=latency_ms,
         status=status + ("+est" if estimated else ""),
+        error_class=None if ok else error_class,
     )
     try:
         await asyncio.to_thread(store.log_llm_call, call)
@@ -128,6 +143,8 @@ async def log_llm_call(
 # Max LLM calls for one question: tool round(s) + the final answer. The last one gets no tools,
 # so the loop always ends with text.
 MAX_TOOL_ROUNDS = 3
+STREAM_ATTEMPTS = 2  # the first try + ONE automatic retry when the stream fails
+STREAM_RETRY_DELAY = 1.0  # seconds before the second attempt
 
 
 async def event_stream(
@@ -149,7 +166,7 @@ async def event_stream(
     use_tools = getattr(provider, "supports_tools", False)
     messages = list(messages)
     answer: list[str] = []
-    error: str | None = None
+    error: tuple[str, str] | None = None  # (class, English message)
 
     for round_no in range(MAX_TOOL_ROUNDS if use_tools else 1):
         if round_no:  # round 0 was paid for in chat(), before the response started
@@ -157,61 +174,77 @@ async def event_stream(
                 if global_limiter:
                     spend_llm_budget(global_limiter)
             except HTTPException:  # HTTP 200 is already sent: report it as an event
-                error = BUSY_MESSAGE
+                error = ("busy", BUSY_MESSAGE)
                 break
         tools = ([CALCULATOR] if round_no < MAX_TOOL_ROUNDS - 1 else []) if use_tools else None
-        usage, retries = Usage(), 0
 
-        def count_retry() -> None:
-            nonlocal retries
-            retries += 1
+        # One automatic second attempt if the stream fails (free-tier Gemini is flaky). Each
+        # attempt is a real LLM call: it spends the budget and writes its own llm_calls row.
+        for attempt in range(1, STREAM_ATTEMPTS + 1):
+            usage, retries = Usage(), 0
 
-        # By the time a token fails, HTTP 200 is already sent: report errors as an event.
-        events = stream_with_retry(provider, messages, usage, on_retry=count_retry, tools=tools)
-        round_text: list[str] = []
-        call: ToolCall | None = None
-        round_error: str | None = None
-        started = time.perf_counter()
-        try:
-            while True:
-                # Idle timeout: applies to every wait, so a model that never starts
-                # (or stalls mid-answer) cannot hang the request forever.
-                async with asyncio.timeout(timeout):
-                    try:
-                        event = await anext(events)
-                    except StopAsyncIteration:
-                        break
-                if isinstance(event, ToolCall):
-                    call = call or event  # one call per round; extra parallel ones are ignored
-                    continue
-                round_text.append(event)
-                answer.append(event)
-                yield sse(event)
-        except TimeoutError:
-            logger.warning("LLM provider sent nothing for %.1fs, giving up", timeout)
-            round_error = (
-                f"The model did not respond within {timeout:g} seconds. "
-                "It may be overloaded — please try again."
+            def count_retry() -> None:
+                nonlocal retries
+                retries += 1
+
+            # By the time a token fails, HTTP 200 is already sent: report errors as an event.
+            events = stream_with_retry(provider, messages, usage, on_retry=count_retry, tools=tools)
+            round_text: list[str] = []
+            call: ToolCall | None = None
+            round_error: tuple[str, str] | None = None
+            started = time.perf_counter()
+            try:
+                while True:
+                    # Idle timeout: applies to every wait, so a model that never starts
+                    # (or stalls mid-answer) cannot hang the request forever.
+                    async with asyncio.timeout(timeout):
+                        try:
+                            event = await anext(events)
+                        except StopAsyncIteration:
+                            break
+                    if isinstance(event, ToolCall):
+                        call = call or event  # one call per round; extra parallel ones are ignored
+                        continue
+                    round_text.append(event)
+                    answer.append(event)
+                    yield sse(event)
+            except Exception as exc:
+                kind = llm_errors.classify(exc)
+                if kind == llm_errors.TIMEOUT:
+                    logger.warning("LLM provider sent nothing for %.1fs, giving up", timeout)
+                else:
+                    logger.exception("LLM provider failed mid-stream (%s)", kind)
+                round_error = (kind, llm_errors.MESSAGES[kind])
+            finally:
+                # Stop the provider's generator so its HTTP request is closed too.
+                await events.aclose()
+            # Not reached when the client disconnects (the generator is closed at a `yield`):
+            # such calls are not logged.
+            await log_llm_call(
+                store,
+                settings,
+                session_id,
+                messages,
+                "".join(round_text),
+                usage,
+                retries,
+                round((time.perf_counter() - started) * 1000),
+                ok=round_error is None,
+                error_class=round_error[0] if round_error else None,
             )
-        except Exception:
-            logger.exception("LLM provider failed mid-stream")
-            round_error = "The model failed to answer. Please try again."
-        finally:
-            # Stop the provider's generator so its HTTP request is closed too.
-            await events.aclose()
-        # Not reached when the client disconnects (the generator is closed at a `yield`): such
-        # calls are not logged.
-        await log_llm_call(
-            store,
-            settings,
-            session_id,
-            messages,
-            "".join(round_text),
-            usage,
-            retries,
-            round((time.perf_counter() - started) * 1000),
-            ok=round_error is None,
-        )
+            if round_error is None or attempt == STREAM_ATTEMPTS:
+                break
+            if round_error[0] == llm_errors.BLOCKED:
+                break  # the same prompt would be refused again
+            try:
+                if global_limiter:
+                    spend_llm_budget(global_limiter)
+            except HTTPException:
+                break  # no budget for a second attempt: report the first failure
+            if answer:  # the client has part of the text: tell it to throw that away
+                answer.clear()
+                yield sse("", event="reset")
+            await llm_retry._sleep(STREAM_RETRY_DELAY)
         if round_error:
             error = round_error
             break
@@ -225,7 +258,7 @@ async def event_stream(
         ]
 
     if error:
-        yield sse(error, event="error")
+        yield sse({"kind": error[0], "message": error[1]}, event="error")
         return
     # Only citations that point to really retrieved chunks reach the client.
     sources = [
@@ -269,6 +302,13 @@ async def start_answer(
     stored = await asyncio.to_thread(store.get_messages, user_id, session_id)
     if stored is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    if is_non_english(message):
+        # The knowledge base and the embedder are English: skip embeddings and the LLM, say why.
+        try:
+            await save_message(store, user_id, session_id, "user", message)
+        except SessionNotFound:
+            raise HTTPException(status_code=404, detail="Session not found") from None
+        return refusal_stream(store, user_id, session_id, channel, reason=NON_ENGLISH)
     # Embedding + DB query are blocking: keep them off the event loop.
     hits = await asyncio.to_thread(retriever, message, user_id)
     best = max((h.similarity for h in hits), default=0.0)
@@ -314,7 +354,7 @@ async def make_flashcards(
     """3-5 cards from one saved assistant answer and the chunks it cited (one LLM call).
 
     Raises HTTPException: 404 (session or answer not the caller's), 422 (no sources to learn
-    from), 429 (budget), 502 (the model failed)."""
+    from), 429 (budget), 502 (invalid model output), 503 (provider unavailable)."""
     stored = await asyncio.to_thread(store.get_messages, user_id, session_id)
     if stored is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -338,7 +378,7 @@ async def make_flashcards(
         retries += 1
 
     cards: FlashcardSet | None = None
-    detail = "The model failed to make flashcards. Please try again."
+    kind = llm_errors.OTHER
     started = time.perf_counter()
     try:
         async with asyncio.timeout(settings.llm_timeout_seconds * FLASHCARDS_TIMEOUT_FACTOR):
@@ -346,12 +386,10 @@ async def make_flashcards(
                 lambda: provider.generate_json(messages, FlashcardSet, usage),
                 on_retry=count_retry,
             )
-    except InvalidLLMOutput:
-        detail = "The model returned flashcards in a wrong format twice. Please try again."
-    except TimeoutError:
-        detail = "The model did not respond in time. It may be overloaded — please try again."
-    except Exception:
-        logger.exception("flashcards: LLM call failed")
+    except Exception as exc:
+        kind = llm_errors.classify(exc)
+        if kind not in (llm_errors.TIMEOUT, llm_errors.INVALID_OUTPUT):
+            logger.exception("flashcards: LLM call failed (%s)", kind)
     await log_llm_call(
         store,
         settings,
@@ -362,9 +400,13 @@ async def make_flashcards(
         retries,
         round((time.perf_counter() - started) * 1000),
         ok=cards is not None,
+        error_class=None if cards else kind,
     )
     if cards is None:
-        raise HTTPException(status_code=502, detail=detail)
+        # 502: the model answered, but not with usable flashcards. 503: the provider is not
+        # available (quota, overload, timeout, refusal); the sentence says which.
+        invalid = kind == llm_errors.INVALID_OUTPUT
+        raise HTTPException(status_code=502 if invalid else 503, detail=llm_errors.MESSAGES[kind])
     await metrics.emit(store, metrics.CARDS_MADE, user_id, channel)
     return check_source_ids(cards, {c.id for c in chunks})
 
@@ -377,6 +419,8 @@ class Collected:
     sources: list[dict] = field(default_factory=list)
     error: str | None = None  # set when the model failed; `text` is then only a partial answer
     message_id: int | None = None
+    refusal_reason: str | None = None  # e.g. non_english
+    error_kind: str | None = None  # quota, overloaded, ...
 
 
 async def collect_answer(stream: AsyncIterator[str]) -> Collected:
@@ -395,8 +439,16 @@ async def collect_answer(stream: AsyncIterator[str]) -> Collected:
             parts.append(data)
         elif name == "sources" and isinstance(data, list):
             out.sources = data
+        elif name == "reset":  # the server is retrying: drop the partial text
+            parts.clear()
+        elif name == "refusal" and isinstance(data, dict):
+            out.refusal_reason = data.get("reason")
         elif name == "error":
-            out.error = str(data)
+            if isinstance(data, dict):
+                out.error = str(data.get("message"))
+                out.error_kind = data.get("kind")
+            else:
+                out.error = str(data)
         elif name == "done" and isinstance(data, dict):
             out.message_id = data.get("message_id")
     out.text = "".join(parts)

@@ -5,6 +5,7 @@ import { NotFoundError, RateLimitError, isAbort } from '@/api/errors'
 import type { Source, ToolEvent } from '@/api/types'
 import i18n from '@/i18n'
 import { describeError, toastError } from '@/lib/errors'
+import { applyChatEvent } from './events'
 import { cleanQuestion } from './question'
 
 export interface ChatMessage {
@@ -17,6 +18,8 @@ export interface ChatMessage {
   tools: ToolEvent[]
   status: 'streaming' | 'done' | 'stopped' | 'error'
   error?: string
+  /** Why the server refused to answer (e.g. 'non_english'), when it did. */
+  refusalReason?: string
   /** Seconds the server asked us to wait (HTTP 429 Retry-After): the retry button counts them down. */
   retryAfter?: number
   /** Produced in this browser session (not loaded from history): only these get onboarding hints. */
@@ -106,12 +109,8 @@ export function useChat(sessionId: string, callbacks: Callbacks) {
 
     try {
       for await (const ev of streamChat(sessionId, question, ctrl.signal)) {
-        if (ev.type === 'token') patch((m) => ({ ...m, content: m.content + ev.text }))
-        else if (ev.type === 'sources') patch((m) => ({ ...m, sources: ev.sources }))
-        else if (ev.type === 'tool') patch((m) => ({ ...m, tools: [...m.tools, ev.tool] }))
-        else if (ev.type === 'done') patch((m) => ({ ...m, status: 'done', messageId: ev.messageId ?? undefined }))
-        // The server's text is English: show our own localized sentence, keep the partial answer.
-        else patch((m) => ({ ...m, status: 'error', error: i18n.t('errors.llm') }))
+        // The server's error text is English: the reducer shows our localized sentence instead.
+        patch((m) => applyChatEvent(m, ev, (key) => i18n.t(key)))
       }
       patch((m) => (m.status === 'streaming' ? { ...m, status: 'done' } : m))
     } catch (e) {

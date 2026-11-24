@@ -231,6 +231,7 @@ class MemoryStore:
             days,
             by_channel,
             {c: len(u) for c, u in users_of.items()},
+            _count_errors(self.llm_calls),
         )
 
     def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:
@@ -297,3 +298,11 @@ def login(store: MemoryStore, email: str = "alice@example.com", sessions: Iterab
 
 def user_id(store: MemoryStore, email: str = "alice@example.com") -> UUID:
     return store.get_user_by_email(email)[0].id
+
+
+def _count_errors(calls) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for c in calls:
+        if c.error_class:
+            out[c.error_class] = out.get(c.error_class, 0) + 1
+    return out

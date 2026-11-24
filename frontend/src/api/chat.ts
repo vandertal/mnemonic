@@ -15,8 +15,19 @@ export function toChatEvent(msg: SseMessage): ChatEvent | null {
       return { type: 'tool', tool: JSON.parse(msg.data) as ToolEvent }
     case 'done':
       return { type: 'done', messageId: (JSON.parse(msg.data) as { message_id: number | null }).message_id }
-    case 'error':
-      return { type: 'error', message: String(JSON.parse(msg.data)) }
+    case 'reset':
+      return { type: 'reset' }
+    case 'refusal':
+      return { type: 'refusal', reason: String((JSON.parse(msg.data) as { reason?: string }).reason ?? '') }
+    case 'error': {
+      // Older servers sent a bare string; the current one sends {kind, message}.
+      const data = JSON.parse(msg.data) as unknown
+      if (data && typeof data === 'object') {
+        const { kind, message } = data as { kind?: string; message?: string }
+        return { type: 'error', message: String(message ?? ''), kind }
+      }
+      return { type: 'error', message: String(data) }
+    }
     default:
       return null
   }

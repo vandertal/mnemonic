@@ -5,6 +5,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from mnemonic.llm.base import Usage, parse_json_with_retry
+from mnemonic.llm.errors import LLMBlocked
 from mnemonic.schemas import Message, ToolCall, ToolSpec
 
 
@@ -35,6 +36,46 @@ def _split(messages: list[Message]) -> tuple[str, list[types.Content]]:
     return system, contents
 
 
+def response_schema(schema: type[BaseModel]) -> dict:
+    """The Pydantic JSON schema without documentation-only keys. The SDK validates a schema
+    strictly and rejects `examples` (added to our models for the OpenAPI docs) *before* any
+    request is sent, which made every structured-output call fail."""
+
+    def clean(node):
+        if isinstance(node, dict):
+            return {k: clean(v) for k, v in node.items() if k not in DOC_ONLY_KEYS}
+        if isinstance(node, list):
+            return [clean(v) for v in node]
+        return node
+
+    return clean(schema.model_json_schema())
+
+
+DOC_ONLY_KEYS = {"examples", "example"}
+
+
+# finish_reason values that mean "the provider refused", not "the answer is complete".
+_BLOCKED_REASONS = {
+    "SAFETY",
+    "PROHIBITED_CONTENT",
+    "BLOCKLIST",
+    "SPII",
+    "RECITATION",
+    "IMAGE_SAFETY",
+}
+
+
+def check_not_blocked(chunk: types.GenerateContentResponse) -> None:
+    """Raise LLMBlocked when the prompt or the answer was stopped by the safety policy."""
+    feedback = chunk.prompt_feedback
+    if feedback is not None and feedback.block_reason is not None:
+        raise LLMBlocked(f"prompt blocked: {feedback.block_reason}")
+    for candidate in chunk.candidates or []:
+        reason = candidate.finish_reason
+        if reason is not None and getattr(reason, "name", str(reason)) in _BLOCKED_REASONS:
+            raise LLMBlocked(f"answer stopped: {getattr(reason, 'name', reason)}")
+
+
 class GeminiProvider:
     supports_tools = True
 
@@ -63,6 +104,7 @@ class GeminiProvider:
             model=self._model, contents=contents, config=config
         )
         async for chunk in response:
+            check_not_blocked(chunk)
             meta = chunk.usage_metadata
             if usage is not None and meta is not None:
                 usage.tokens_in = meta.prompt_token_count
@@ -89,6 +131,7 @@ class GeminiProvider:
             model=self._model, contents=contents, config=config
         )
         async for chunk in response:
+            check_not_blocked(chunk)
             meta = chunk.usage_metadata
             if usage is not None and meta is not None:
                 # Counts are cumulative: the last chunk holds the totals. "Thinking" tokens
@@ -109,7 +152,7 @@ class GeminiProvider:
         config = types.GenerateContentConfig(
             system_instruction=system or None,
             response_mime_type="application/json",
-            response_schema=schema,
+            response_json_schema=response_schema(schema),
         )
 
         async def complete() -> str:

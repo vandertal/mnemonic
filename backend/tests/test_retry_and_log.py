@@ -140,22 +140,35 @@ def test_chat_retries_503_before_first_token(sleeps):
     assert store.llm_calls[0].status.startswith("retried")
 
 
-def test_chat_does_not_retry_after_first_token(sleeps):
+def test_stream_wrapper_does_not_retry_after_first_token_but_the_route_restarts_once(sleeps):
+    # stream_with_retry itself never repeats after a token (it would duplicate text); the route
+    # then makes ONE fresh attempt and tells the client to drop the partial text (`reset`).
     provider = ScriptedProvider(["part", ProviderError(503)], ["part", "ial"])
     client, store = make_client(provider)
     events = parse_events(ask(client).text)
 
-    assert [name for name, _ in events] == ["message", "error"]
-    assert provider.calls == 1 and sleeps == []
-    assert store.llm_calls[0].status.startswith("error")  # the failed call is logged too
+    assert [name for name, _ in events] == [
+        "message",
+        "reset",
+        "message",
+        "message",
+        "sources",
+        "done",
+    ]
+    assert provider.calls == 2
+    assert [c.status[:5] for c in store.llm_calls] == ["error", "ok+es"]  # both calls are logged
+    assert [c.error_class for c in store.llm_calls] == ["overloaded", None]
 
 
 def test_chat_error_after_exhausted_retries_is_logged_and_reported(sleeps):
-    client, store = make_client(ScriptedProvider(*[[ProviderError(503)]] * 3))
+    # 3 provider tries inside each of the 2 route attempts
+    client, store = make_client(ScriptedProvider(*[[ProviderError(503)]] * 6))
     events = parse_events(ask(client).text)
 
-    assert [name for name, _ in events] == ["error"]
-    assert len(sleeps) == 2 and store.llm_calls[0].status.startswith("error")
+    assert [name for name, _ in events] == ["error"]  # nothing was sent: no reset
+    assert events[0][1]["kind"] == "overloaded"
+    assert len(sleeps) == 2 + 1 + 2  # backoff, the pause before attempt 2, backoff
+    assert [c.status for c in store.llm_calls] == ["error+est", "error+est"]
 
 
 def test_llm_call_uses_provider_usage_and_prices(sleeps):

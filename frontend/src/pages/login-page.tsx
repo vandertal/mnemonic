@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/auth'
 import { authErrorKey, describeError } from '@/lib/errors'
-import { AuthError } from '@/api/errors'
+import { AuthError, RateLimitError } from '@/api/errors'
+import { useCooldown } from '@/lib/use-cooldown'
 import { fromPath } from '@/lib/redirect'
 
 // Messages are i18n keys, translated at render, so they follow the language switcher.
@@ -23,6 +24,7 @@ export default function LoginPage() {
   const { t } = useTranslation()
   const { status, login } = useAuth()
   const location = useLocation()
+  const cooldown = useCooldown()
   const {
     register,
     handleSubmit,
@@ -39,6 +41,7 @@ export default function LoginPage() {
     } catch (e) {
       const key = authErrorKey(e)
       if (e instanceof AuthError) setError('root', { message: key })
+      else if (e instanceof RateLimitError) cooldown.start(e.retryAfter ?? 60)
       else toast.error(key ? t(key) : describeError(e, t))
     }
   }
@@ -67,13 +70,18 @@ export default function LoginPage() {
             {...register('password')}
           />
         </Field>
-        {errors.root?.message && (
+        {cooldown.left > 0 && (
+          <p role="alert" className="text-sm text-destructive">
+            {t('auth.tooManyWait', { seconds: cooldown.left })}
+          </p>
+        )}
+        {errors.root?.message && cooldown.left === 0 && (
           <p role="alert" className="text-sm text-destructive">
             {t(errors.root.message)}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={isSubmitting}>
-          {isSubmitting ? t('auth.signingIn') : t('auth.signIn')}
+        <Button type="submit" className="w-full" disabled={isSubmitting || cooldown.left > 0}>
+          {isSubmitting ? t('auth.signingIn') : cooldown.left > 0 ? t('auth.tryIn', { seconds: cooldown.left }) : t('auth.signIn')}
         </Button>
       </form>
       <p className="mt-5 text-center text-sm text-muted-foreground">

@@ -29,10 +29,11 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from mnemonic import events as metrics
-from mnemonic.answering import collect_answer, make_flashcards, start_answer
+from mnemonic.answering import NON_ENGLISH, collect_answer, make_flashcards, start_answer
 from mnemonic.auth import hash_password
 from mnemonic.config import Settings
 from mnemonic.limits import SlidingWindowLimiter
+from mnemonic.llm import errors as llm_errors
 from mnemonic.llm.base import LLMProvider
 from mnemonic.retrieval import Retriever
 from mnemonic.schemas import ChatRequest
@@ -77,6 +78,7 @@ BUSY = "The service is busy right now. Try again in a minute."
 ERR_MODEL = "The model couldn't finish the answer. Please try again."
 ERR_CARDS = "The model couldn't make flashcards. Please try again."
 ERR_GENERIC = "Something went wrong. Please try again."
+NON_ENGLISH_HINT = "Ask in English: the knowledge base is in English."
 
 
 @dataclass(frozen=True)
@@ -328,9 +330,19 @@ def friendly_error(error: HTTPException, *, cards: bool = False) -> str:
         return BUSY
     if error.status_code == 422:
         return NO_CARDS_REFUSED
-    if error.status_code == 502:
-        return ERR_CARDS if cards else ERR_MODEL
+    if error.status_code in (502, 503):
+        # The server's sentence names the cause (quota, overload, invalid output); it is a fixed
+        # text, never user input. The unclassified one is replaced by the generic wording.
+        return model_error(str(error.detail), cards=cards)
     return ERR_GENERIC
+
+
+def model_error(server_message: str, *, cards: bool = False) -> str:
+    """A specific sentence for a classified failure, the generic one for "other"."""
+    known = {m for k, m in llm_errors.MESSAGES.items() if k != llm_errors.OTHER}
+    if server_message in known:
+        return server_message
+    return ERR_CARDS if cards else ERR_MODEL
 
 
 def log_failure(error: BaseException) -> None:
@@ -486,8 +498,11 @@ class TelegramBot:
             except HTTPException as error:
                 await self._say(chat_id, esc(friendly_error(error)))
                 return
+        if answer.refusal_reason == NON_ENGLISH:
+            await self._say(chat_id, esc(NON_ENGLISH_HINT))
+            return
         if answer.error or not answer.text.strip():
-            await self._say(chat_id, esc(ERR_MODEL))
+            await self._say(chat_id, esc(model_error(answer.error or "")))
             return
         for message in render_answer(answer.text, answer.sources):
             await self._say(chat_id, message)
