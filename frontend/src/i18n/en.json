@@ -40,7 +40,10 @@
     "emailTaken": "This email is already registered. Try signing in.",
     "tooMany": "Too many attempts. Wait a minute and try again.",
     "sessionExpired": "Your session has ended. Please sign in again.",
-    "checkFailed": "Couldn't check your session. Check your connection and try again."
+    "checkFailed": "Couldn't check your session. Check your connection and try again.",
+    "backHome": "Back to home",
+    "tooManyWait": "Too many attempts. Try again in {{seconds}} s.",
+    "tryIn": "Try again in {{seconds}} s"
   },
   "chat": {
     "title": "What do you want to learn?",
@@ -78,7 +81,8 @@
     "examplesLabel": "Example questions",
     "counter": "{{count}} / {{max}}",
     "tryAgain": "Try again",
-    "retryIn": "Try again in {{seconds}} s"
+    "retryIn": "Try again in {{seconds}} s",
+    "nonEnglish": "Ask in English: the knowledge base is in English."
   },
   "source": {
     "open": "Open source {{n}}",
@@ -202,7 +206,12 @@
     "emptyInput": "Type a question first.",
     "invalidInput": "The server could not accept that input. Check it and try again.",
     "streamCut": "The connection dropped while the answer was being written. Try again.",
-    "llm": "The model couldn't finish the answer. Please try again."
+    "llm": "The model couldn't finish the answer. Please try again.",
+    "llmQuota": "The AI service's free quota is used up for now. Try again in a minute.",
+    "llmOverloaded": "The model is temporarily overloaded. Try again in a moment.",
+    "llmBlocked": "The model declined to answer this question. Try rephrasing it.",
+    "llmTimeout": "The model took too long to answer. Try again.",
+    "invalidOutput": "The model returned an unusable result. Please try again."
   },
   "common": {
     "cancel": "Cancel",

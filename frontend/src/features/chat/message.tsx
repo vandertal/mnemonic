@@ -108,7 +108,9 @@ function AssistantMessage({ message, sessionId, question, isLast, onRetry }: Mes
             <SearchX className="size-4" />
             {t('chat.dontKnow')}
           </div>
-          <p className="text-sm text-muted-foreground">{content}</p>
+          <p className="text-sm text-muted-foreground">
+            {message.refusalReason === 'non_english' ? t('chat.nonEnglish') : content}
+          </p>
         </div>
       ) : (
         content && <Markdown className={cn(streaming && 'streaming-caret')} citations={citations}>

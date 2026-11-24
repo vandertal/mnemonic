@@ -54,7 +54,9 @@ export async function apiFetch(path: string, { skipAuthFailure, ...init }: Optio
       problems,
     })
     // Every call goes through here, SSE streams included (their 401 arrives as the response status).
-    if (res.status === 401 && !skipAuthFailure) {
+    // Only if the token we sent is still the stored one: a late 401 of a request made with an OLD
+    // token (e.g. in flight while the account was deleted) must not log out the new session.
+    if (res.status === 401 && !skipAuthFailure && token && getToken() === token) {
       clearToken()
       onAuthFailure()
     }

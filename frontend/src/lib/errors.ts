@@ -27,8 +27,9 @@ export function describeError(e: unknown, t: TFunction = i18n.t): string {
   if (e instanceof ValidationError) return describeValidation(e, t)
   if (e instanceof StreamInterruptedError) return t('errors.streamCut')
   if (e instanceof ApiError) {
+    if (e.status === 502) return t('errors.invalidOutput') // the model answered with unusable output
     if (e.status === 503) return t('errors.busy')
-    if (e.status >= 500 && e.status !== 502) return t('errors.server')
+    if (e.status >= 500) return t('errors.server')
     return e.message || t('errors.generic')
   }
   return t('errors.generic')

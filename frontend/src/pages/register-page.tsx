@@ -4,13 +4,14 @@ import { useTranslation } from 'react-i18next'
 import { Link, Navigate, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
-import { ConflictError, ForbiddenError } from '@/api/errors'
+import { ConflictError, ForbiddenError, RateLimitError } from '@/api/errors'
 import { AuthLayout, Field } from '@/components/auth-layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/auth'
 import { authErrorKey, describeError } from '@/lib/errors'
 import { fromPath } from '@/lib/redirect'
+import { useCooldown } from '@/lib/use-cooldown'
 
 const schema = z.object({
   email: z.string().trim().min(1, 'auth.emailRequired').pipe(z.email('auth.emailInvalid')),
@@ -23,6 +24,7 @@ export default function RegisterPage() {
   const { t } = useTranslation()
   const { status, register: signUp } = useAuth()
   const location = useLocation()
+  const cooldown = useCooldown()
   const {
     register,
     handleSubmit,
@@ -39,6 +41,7 @@ export default function RegisterPage() {
       const key = authErrorKey(e)
       if (e instanceof ConflictError) setError('email', { message: key })
       else if (e instanceof ForbiddenError) setError('invite', { message: key })
+      else if (e instanceof RateLimitError) cooldown.start(e.retryAfter ?? 60)
       else toast.error(key ? t(key) : describeError(e, t))
     }
   }
@@ -78,8 +81,17 @@ export default function RegisterPage() {
             {...register('invite')}
           />
         </Field>
-        <Button type="submit" className="w-full" disabled={isSubmitting}>
-          {isSubmitting ? t('auth.signingUp') : t('auth.signUpButton')}
+        {cooldown.left > 0 && (
+          <p role="alert" className="text-sm text-destructive">
+            {t('auth.tooManyWait', { seconds: cooldown.left })}
+          </p>
+        )}
+        <Button type="submit" className="w-full" disabled={isSubmitting || cooldown.left > 0}>
+          {isSubmitting
+            ? t('auth.signingUp')
+            : cooldown.left > 0
+              ? t('auth.tryIn', { seconds: cooldown.left })
+              : t('auth.signUpButton')}
         </Button>
       </form>
       <p className="mt-5 text-center text-sm text-muted-foreground">

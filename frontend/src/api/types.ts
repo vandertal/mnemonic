@@ -32,7 +32,9 @@ export type ChatEvent =
   | { type: 'sources'; sources: Source[] }
   | { type: 'tool'; tool: ToolEvent }
   | { type: 'done'; messageId: number | null }
-  | { type: 'error'; message: string }
+  | { type: 'reset' } // the server is retrying: throw away the text received so far
+  | { type: 'refusal'; reason: string } // e.g. 'non_english'
+  | { type: 'error'; message: string; kind?: string } // kind: quota, overloaded, blocked, timeout, other
 
 export interface DocumentInfo {
   id: number
