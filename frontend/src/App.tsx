@@ -17,6 +17,7 @@ const LoginPage = lazy(() => import('@/pages/login-page'))
 const RegisterPage = lazy(() => import('@/pages/register-page'))
 const ChatPage = lazy(() => import('@/pages/chat-page'))
 const DocumentsPage = lazy(() => import('@/pages/documents-page'))
+const SearchPage = lazy(() => import('@/pages/search-page'))
 const FlashcardsPage = lazy(() => import('@/pages/flashcards-page'))
 const NotFoundPage = lazy(() => import('@/pages/not-found-page'))
 const SettingsPage = lazy(() => import('@/pages/settings-page'))
@@ -83,6 +84,7 @@ export default function App() {
                   <Route index element={<Navigate to="/chat" replace />} />
                   <Route path="/chat/:sessionId?" element={<ChatPage />} />
                   <Route path="/documents" element={<DocumentsPage />} />
+                  <Route path="/search" element={<SearchPage />} />
                   <Route path="/flashcards" element={<FlashcardsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                 </Route>

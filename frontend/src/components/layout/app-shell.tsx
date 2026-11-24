@@ -8,6 +8,7 @@ import {
   PanelLeftOpen,
   Pencil,
   Plus,
+  Search,
   Settings,
   Trash2,
 } from 'lucide-react'
@@ -33,6 +34,7 @@ import { cn } from '@/lib/utils'
 
 const NAV = [
   { to: '/chat', icon: MessageSquare, key: 'nav.chat' },
+  { to: '/search', icon: Search, key: 'nav.search' },
   { to: '/documents', icon: FileText, key: 'nav.documents' },
   { to: '/flashcards', icon: Layers, key: 'nav.flashcards' },
   { to: '/settings', icon: Settings, key: 'nav.settings' },

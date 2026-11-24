@@ -72,3 +72,40 @@ export interface SessionPage {
   offset: number
   next: number | null
 }
+
+export type Ranker = 'bm25' | 'tfidf'
+export type SearchMode = 'all' | 'any'
+
+export interface Snippet {
+  text: string
+  /** [start, end) offsets into `text`, counted in Unicode code points (Python), not UTF-16 units. */
+  highlights: [number, number][]
+}
+
+export interface SearchHit {
+  chunk_id: number
+  document: string
+  heading: string
+  score: number
+  snippet: Snippet
+  matched_terms: string[]
+}
+
+export interface TermExplanation {
+  term: string
+  tf: number
+  df: number
+  idf: number
+  contribution: number
+}
+
+export interface Explanation {
+  chunk_id: number
+  document: string
+  ranker: Ranker
+  n_docs: number
+  avgdl: number
+  doc_length: number
+  terms: TermExplanation[]
+  score: number
+}

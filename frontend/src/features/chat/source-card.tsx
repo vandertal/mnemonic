@@ -7,16 +7,20 @@ import { snippetOf } from './citations'
 import { Markdown } from './markdown'
 import { useChunk } from './use-chunk'
 
-const titleOf = (s: Source) => s.heading || s.file_path
+/** What the dialog needs. `similarity` is optional: a search hit has a BM25 score, not a cosine match. */
+export type SourceRef = Pick<Source, 'id' | 'file_path' | 'heading'> & { similarity?: number }
 
-function SourceDialogBody({ source }: { source: Source }) {
+const titleOf = (s: SourceRef) => s.heading || s.file_path
+
+function SourceDialogBody({ source }: { source: SourceRef }) {
   const { t } = useTranslation()
   const state = useChunk(source.id)
   return (
     <>
       <DialogTitle className="pr-8 text-base font-semibold">{titleOf(source)}</DialogTitle>
       <DialogDescription className="mt-1 text-xs text-muted-foreground">
-        {source.file_path} · {t('source.match', { percent: Math.round(source.similarity * 100) })}
+        {source.file_path}
+        {source.similarity !== undefined && ` · ${t('source.match', { percent: Math.round(source.similarity * 100) })}`}
       </DialogDescription>
       <div className="mt-4 text-sm">
         {state.status === 'loading' && (
@@ -30,6 +34,23 @@ function SourceDialogBody({ source }: { source: Source }) {
         {state.status === 'ready' && <Markdown>{state.chunk.content}</Markdown>}
       </div>
     </>
+  )
+}
+
+/** The passage viewer, shared by chat citations and search results. */
+export function SourceDialog({
+  source,
+  open,
+  onOpenChange,
+}: {
+  source: SourceRef
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>{open && <SourceDialogBody source={source} />}</DialogContent>
+    </Dialog>
   )
 }
 

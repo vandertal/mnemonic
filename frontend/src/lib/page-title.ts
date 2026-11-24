@@ -6,6 +6,7 @@ const TITLE_KEYS: Record<string, string> = {
   '/login': 'auth.loginTitle',
   '/register': 'auth.registerTitle',
   '/chat': 'nav.chat',
+  '/search': 'nav.search',
   '/documents': 'nav.documents',
   '/flashcards': 'nav.flashcards',
   '/settings': 'nav.settings',
