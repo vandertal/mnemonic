@@ -35,6 +35,24 @@ def _split(messages: list[Message]) -> tuple[str, list[types.Content]]:
     return system, contents
 
 
+def response_schema(schema: type[BaseModel]) -> dict:
+    """The Pydantic JSON schema without documentation-only keys. The SDK validates a schema
+    strictly and rejects `examples` (added to our models for the OpenAPI docs) *before* any
+    request is sent, which made every structured-output call fail."""
+
+    def clean(node):
+        if isinstance(node, dict):
+            return {k: clean(v) for k, v in node.items() if k not in DOC_ONLY_KEYS}
+        if isinstance(node, list):
+            return [clean(v) for v in node]
+        return node
+
+    return clean(schema.model_json_schema())
+
+
+DOC_ONLY_KEYS = {"examples", "example"}
+
+
 class GeminiProvider:
     supports_tools = True
 
@@ -109,7 +127,7 @@ class GeminiProvider:
         config = types.GenerateContentConfig(
             system_instruction=system or None,
             response_mime_type="application/json",
-            response_schema=schema,
+            response_json_schema=response_schema(schema),
         )
 
         async def complete() -> str:
