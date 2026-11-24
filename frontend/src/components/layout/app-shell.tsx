@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom'
 import { PageFallback } from '@/components/page-fallback'
 import { OfflineBanner } from '@/components/offline-banner'
+import { ColdStartBanner } from '@/components/cold-start-banner'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
@@ -281,6 +282,7 @@ export function AppShell() {
           <span className="font-semibold tracking-tight">{t('app.name')}</span>
         </header>
         <OfflineBanner />
+        <ColdStartBanner />
         <main className="flex min-h-0 flex-1 flex-col">
           <Suspense fallback={<PageFallback inShell />}>
             <Outlet />

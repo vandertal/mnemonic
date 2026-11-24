@@ -21,3 +21,10 @@ def test_preflight_rejects_a_foreign_origin():
     r = TestClient(app).options("/chat", headers={"Origin": "https://evil.example", **PREFLIGHT})
     assert r.status_code == 400
     assert "access-control-allow-origin" not in r.headers
+
+
+def test_retry_after_is_readable_by_the_browser():
+    # Without expose_headers the SPA cannot read Retry-After from a cross-origin 429, so it could
+    # not show the "try again in N seconds" countdown.
+    r = TestClient(app).get("/health", headers={"Origin": "http://localhost:5173"})
+    assert "retry-after" in r.headers["access-control-expose-headers"].lower()

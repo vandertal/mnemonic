@@ -18,7 +18,7 @@ from mnemonic.config import get_settings
 from mnemonic.store import PgStore
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-TABLES = "users, sessions, messages, llm_calls, documents, chunks"
+TABLES = "users, sessions, messages, llm_calls, documents, chunks, events"
 
 
 def pytest_collection_modifyitems(config, items):

@@ -14,10 +14,13 @@ export function MakeFlashcardsButton({
   sessionId,
   messageId,
   question,
+  onMake,
 }: {
   sessionId: string
   messageId: number
   question: string
+  /** Called when the user starts making cards (the onboarding hint is then redundant). */
+  onMake?: () => void
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -33,7 +36,10 @@ export function MakeFlashcardsButton({
     onError: toastError,
   })
   return (
-    <Button variant="ghost" size="sm" disabled={make.isPending} onClick={() => make.mutate()}>
+    <Button variant="ghost" size="sm" disabled={make.isPending} onClick={() => {
+        onMake?.()
+        make.mutate()
+      }}>
       {make.isPending ? <Loader2 className="size-4 animate-spin" /> : <Layers className="size-4" />}
       {make.isPending ? t('flashcards.making') : t('flashcards.make')}
     </Button>

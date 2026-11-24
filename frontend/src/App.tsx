@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/card'
 import { usePageTitle } from '@/lib/page-title'
 
 // Each page is its own chunk: the first paint only downloads the code of the page being opened.
+const LandingPage = lazy(() => import('@/pages/landing-page'))
 const LoginPage = lazy(() => import('@/pages/login-page'))
 const RegisterPage = lazy(() => import('@/pages/register-page'))
 const ChatPage = lazy(() => import('@/pages/chat-page'))
@@ -57,6 +58,17 @@ function RequireAuth() {
   return <Outlet />
 }
 
+/**
+ * `/`: the landing page for signed-out visitors, the app for everyone else. While a stored token is
+ * still being checked we show the skeleton instead of flashing the landing page at a signed-in user.
+ */
+function Home() {
+  const { status } = useAuth()
+  if (status === 'loading') return <PageFallback />
+  if (status === 'anonymous') return <LandingPage />
+  return <Navigate to="/chat" replace /> // authenticated; on 'error' RequireAuth offers the retry
+}
+
 /** Keeps document.title in sync with the route (and the language). Renders nothing. */
 function PageTitle() {
   usePageTitle()
@@ -77,11 +89,11 @@ export default function App() {
             <PageTitle />
             <Suspense fallback={<PageFallback />}>
               <Routes>
+              <Route path="/" element={<Home />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route element={<RequireAuth />}>
                 <Route element={<AppShell />}>
-                  <Route index element={<Navigate to="/chat" replace />} />
                   <Route path="/chat/:sessionId?" element={<ChatPage />} />
                   <Route path="/documents" element={<DocumentsPage />} />
                   <Route path="/search" element={<SearchPage />} />

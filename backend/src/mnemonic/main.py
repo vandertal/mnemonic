@@ -12,9 +12,11 @@ from uuid import UUID
 import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi import Path as PathParam
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
+from mnemonic import events as metrics
 from mnemonic.auth import get_current_user
 from mnemonic.config import Settings, get_settings
 from mnemonic.documents import DocumentError, extract_text, safe_filename
@@ -35,6 +37,7 @@ from mnemonic.rag import (
     valid_citations,
 )
 from mnemonic.retrieval import Hit, PgRetriever, Retriever, is_answerable
+from mnemonic.routes_admin import router as admin_router
 from mnemonic.routes_auth import router as auth_router
 from mnemonic.routes_search import router as search_router
 from mnemonic.routes_sessions import router as sessions_router
@@ -115,9 +118,23 @@ app.add_middleware(
     allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["Retry-After"],  # the SPA shows a countdown from it on a 429
 )
 
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Same 422 body as FastAPI's default, minus the echoed `input`: a request containing text
+    that cannot be encoded (a lone surrogate) would otherwise crash the error response itself,
+    and echoing user input back is not useful anyway."""
+    errors = [
+        {k: v for k, v in e.items() if k not in ("input", "ctx", "url")} for e in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(sessions_router)
 app.include_router(search_router)
 
@@ -203,6 +220,7 @@ async def save_message(
 async def refusal_stream(store: Store, user_id: UUID, session_id: UUID) -> AsyncIterator[str]:
     yield sse(REFUSAL)
     message_id = await save_message(store, user_id, session_id, "assistant", REFUSAL, [])
+    await metrics.emit(store, metrics.QUESTION_ANSWERED, user_id, cited=False, refused=True)
     yield sse({"message_id": message_id}, event="done")
 
 
@@ -355,6 +373,9 @@ async def event_stream(
     except Exception:
         # The user already has the answer on screen; losing history is the lesser evil.
         logger.exception("could not save the assistant message")
+    await metrics.emit(
+        store, metrics.QUESTION_ANSWERED, user_id, cited=bool(sources), refused=False
+    )
     yield sse(sources, event="sources")
     yield sse({"message_id": message_id}, event="done")  # None if saving failed
 
@@ -505,6 +526,7 @@ async def flashcards(
     )
     if cards is None:
         raise HTTPException(status_code=502, detail=detail)
+    await metrics.emit(store, metrics.CARDS_MADE, user.id)
     return check_source_ids(cards, {c.id for c in chunks})
 
 

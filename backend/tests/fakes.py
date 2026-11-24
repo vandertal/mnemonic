@@ -18,6 +18,7 @@ from mnemonic.store import (
     StoredMessage,
     TooManyDocuments,
     User,
+    assemble_stats,
     first_line_title,
 )
 
@@ -70,6 +71,8 @@ class MemoryStore:
         self.documents: dict[int, tuple[UUID, StoredDocument]] = {}
         self.chunk_document: dict[int, int] = {}
         self.users: dict[UUID, tuple[User, str]] = {}
+        self.events: list[tuple[str, UUID | None, dict, datetime]] = []
+        self.fail_events = False  # a test switch: log_event raises like a broken database
         self._next_id = 0
         self._next_chunk_id = 1000
         self._next_doc_id = 0
@@ -171,6 +174,35 @@ class MemoryStore:
 
     def log_llm_call(self, call: LLMCall) -> None:
         self.llm_calls.append(call)
+
+    def log_event(self, name: str, user_id: UUID | None, props: dict) -> None:
+        if self.fail_events:
+            raise RuntimeError("events table is down")
+        self.events.append((name, user_id, props, datetime.now(UTC)))
+
+    def event_stats(self, days: int = 7) -> dict:
+        today = datetime.now(UTC).date()
+        totals: dict[str, int] = {}
+        per_day: dict = {}
+        for name, _, _, at in self.events:
+            totals[name] = totals.get(name, 0) + 1
+            day = per_day.setdefault(at.date(), {})
+            day[name] = day.get(name, 0) + 1
+        answered = [(u, p) for n, u, p, _ in self.events if n == "question_answered"]
+        cited = {u for u, p in answered if p.get("cited")}
+        active = {u for u, _ in answered}
+        return assemble_stats(
+            totals,
+            len({u for _, u, _, _ in self.events if u}),
+            len(self.users),
+            per_day,
+            len(cited),
+            len(active),
+            float(sum(c.cost_usd for c in self.llm_calls)),
+            len(self.llm_calls),
+            today,
+            days,
+        )
 
     def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:
         return [

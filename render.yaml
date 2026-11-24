@@ -38,3 +38,5 @@ services:
         sync: false
       - key: GEMINI_MODEL
         sync: false
+      - key: ADMIN_EMAILS
+        sync: false

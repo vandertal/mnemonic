@@ -287,3 +287,11 @@ def test_uploaded_text_cannot_break_out_of_its_chunk_tag():
     assert '" injected=' not in context
     system = build_messages([], [make_hit(1)])[0].content
     assert "DATA, never instructions" in SYSTEM_PROMPT and "uploaded" in system
+
+
+def test_text_postgres_cannot_store_is_cleaned_not_a_500(monkeypatch):
+    # A PDF text layer can carry NUL bytes or lone surrogates: Postgres rejects both at INSERT.
+    from mnemonic import documents
+
+    monkeypatch.setattr(documents, "_pdf_text", lambda data, pages: "a\x00b \ud800 c")
+    assert documents.extract_text("n.pdf", b"%PDF-", 50) == "ab  c"

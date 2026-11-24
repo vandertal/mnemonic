@@ -48,8 +48,14 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024
     max_pdf_pages: int = 50
     max_documents_per_owner: int = 5
+    # Comma-separated emails allowed to read GET /admin/stats (empty = nobody; the route is a 404).
+    admin_emails: str = ""
     # Browser origins allowed to call the API (comma-separated). The default is the Vite dev server.
     cors_origins: str = "http://localhost:5173"
+
+
+def admin_email_set(settings: Settings) -> set[str]:
+    return {e.strip().lower() for e in settings.admin_emails.split(",") if e.strip()}
 
 
 @lru_cache

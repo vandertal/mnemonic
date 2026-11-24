@@ -3,7 +3,7 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 
-const MAX_LENGTH = 2000 // the backend rejects longer questions
+import { COUNTER_FROM, MAX_QUESTION as MAX_LENGTH } from './question'
 
 export function Composer({ busy, onSend, onStop }: { busy: boolean; onSend: (text: string) => void; onStop: () => void }) {
   const { t } = useTranslation()
@@ -33,7 +33,15 @@ export function Composer({ busy, onSend, onStop }: { busy: boolean; onSend: (tex
   }
 
   return (
-    <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-md transition-shadow focus-within:ring-2 focus-within:ring-ring">
+    <div className="relative flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-md transition-shadow focus-within:ring-2 focus-within:ring-ring">
+      {value.length >= COUNTER_FROM && (
+        <span
+          aria-live="polite"
+          className="absolute -top-5 right-3 text-xs tabular-nums text-muted-foreground"
+        >
+          {t('chat.counter', { count: value.length, max: MAX_LENGTH })}
+        </span>
+      )}
       <textarea
         ref={ref}
         rows={1}

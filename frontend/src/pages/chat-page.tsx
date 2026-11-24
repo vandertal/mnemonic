@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { BookOpen, SearchX } from 'lucide-react'
+import { BookOpen, SearchX, Sparkles } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -28,17 +28,24 @@ function EmptyState({ onPick }: { onPick: (q: string) => void }) {
         <h1 className="text-2xl font-semibold tracking-tight">{t('chat.title')}</h1>
         <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">{t('chat.subtitle')}</p>
       </div>
-      <div className="flex max-w-xl flex-wrap justify-center gap-2">
-        {suggestions.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onPick(s)}
-            className="cursor-pointer rounded-full border bg-card px-3.5 py-1.5 text-sm shadow-sm transition-colors hover:bg-muted"
-          >
-            {s}
-          </button>
-        ))}
+      <div className="flex w-full max-w-xl flex-col items-stretch gap-2">
+        <p className="inline-flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <Sparkles className="size-3.5" aria-hidden="true" />
+          {t('chat.kbReady')}
+        </p>
+        <ul className="flex flex-col gap-2" aria-label={t('chat.examplesLabel')}>
+          {suggestions.map((s) => (
+            <li key={s}>
+              <button
+                type="button"
+                onClick={() => onPick(s)}
+                className="w-full cursor-pointer rounded-xl border bg-card px-4 py-2.5 text-left text-sm shadow-sm transition-colors hover:bg-muted"
+              >
+                {s}
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   )
@@ -155,6 +162,12 @@ function ChatView({ sessionId }: { sessionId: string }) {
                 message={m}
                 sessionId={sessionId}
                 question={messages.slice(0, i).findLast((p) => p.role === 'user')?.content ?? ''}
+                isLast={i === messages.length - 1}
+                onRetry={
+                  busy
+                    ? undefined
+                    : () => onSend(messages.slice(0, i).findLast((p) => p.role === 'user')?.content ?? '')
+                }
               />
             ))
           )}
