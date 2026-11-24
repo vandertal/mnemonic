@@ -80,6 +80,11 @@ uv run alembic upgrade head                # apply migrations (DATABASE_URL)
 uv run alembic downgrade -1                # undo the last one
 uv run alembic revision -m "what changes"  # new raw-SQL migration
 
+# search engine CLI (lab 15), from backend/
+uv run python scripts/search_cli.py                      # interactive; FastAPI docs by default
+uv run python scripts/search_cli.py --bench              # index time, size, p50/p95 latency
+uv run python scripts/search_cli.py --ranker tfidf --mode any --explain 1 --dir <folder>
+
 # frontend (from lab 22)
 cd frontend
 npm run dev       # runs the API preflight first

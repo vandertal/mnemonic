@@ -48,7 +48,7 @@ So: the engine from the brief is built **by hand** as a pure Python package insi
 
 ## Milestones (3)
 
-**M1 — The engine (pure Python + CLI).** [ ]
+**M1 — The engine (pure Python + CLI).** [x]
 Tokenizer, stop words, positional index, BM25 + TF-IDF, AND/any/phrase/`-term`, snippets with offsets, `explain`, persistence, CLI with `--bench`, unit tests.
 Check: tests green; CLI answers a keyword query on the FastAPI docs in < 100 ms; bench numbers printed (index time, docs, terms, p50/p95).
 

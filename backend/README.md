@@ -93,3 +93,19 @@ uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 Try it in `/docs` (Authorize), or against a running server:
 `uv run python scripts/auth_smoke.py http://127.0.0.1:8000`.
+
+## Search engine (lab 15)
+
+`src/mnemonic/search/` is a hand-written search engine: stdlib only, no FastAPI or database imports.
+Positional inverted index, code-aware tokenizer (`response_model` is indexed whole and as parts),
+BM25 (default) and TF-IDF, queries `foo bar`, `"exact phrase"`, `-word`, snippets with highlight
+offsets, `explain`, versioned JSON save/load.
+
+```powershell
+uv run python scripts/search_cli.py                 # interactive, over the FastAPI docs
+uv run python scripts/search_cli.py --bench         # index time, size, p50/p95 latency
+uv run python scripts/search_cli.py --explain 1     # per-term tf, df, idf, contribution of hit 1
+```
+
+The docs folder is the one `python -m mnemonic.ingest` clones (`data/fastapi/docs/en/docs`);
+use `--dir` for any folder of `.md`/`.txt` files.
