@@ -40,6 +40,9 @@ def extract_text(filename: str, data: bytes, max_pdf_pages: int) -> str:
         text = _pdf_text(data, max_pdf_pages)
     else:
         text = _plain_text(data)
+    # Postgres text cannot hold NUL, and a lone surrogate cannot be encoded: drop both, so a
+    # weird PDF is a normal upload instead of a 500 at the INSERT.
+    text = text.replace("\x00", "").encode("utf-8", "ignore").decode("utf-8")
     if not text.strip():
         raise DocumentError(422, "The file has no text")
     return text

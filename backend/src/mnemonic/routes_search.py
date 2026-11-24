@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from mnemonic import events
 from mnemonic.auth import get_current_user
 from mnemonic.openapi import R401, R404, R422, R429
 from mnemonic.schemas import ExplainOut, SearchHitOut, SnippetOut, TermExplanationOut
@@ -91,7 +92,9 @@ async def search(
             if int(h.doc_id) in chunks
         ]
 
-    return await asyncio.to_thread(work)
+    hits = await asyncio.to_thread(work)
+    await events.emit(store, events.SEARCH, user.id, results=bool(hits))
+    return hits
 
 
 @router.get(

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class ToolSpec(BaseModel):
@@ -65,6 +65,21 @@ class ChatRequest(BaseModel):
 
     session_id: UUID = Field(description="A session of the caller, from `POST /sessions`.")
     message: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("message")
+    @classmethod
+    def readable_question(cls, value: str) -> str:
+        """Whitespace-only questions and text Postgres cannot store (NUL, lone surrogates) are
+        a clean 422 here instead of a 500 at the database."""
+        if not value.strip():
+            raise ValueError("The question is empty")
+        if "\x00" in value:
+            raise ValueError("The question contains a NUL character")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("The question contains invalid Unicode") from None
+        return value
 
 
 class Flashcard(BaseModel):

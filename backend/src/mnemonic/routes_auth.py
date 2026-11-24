@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
+from mnemonic import events
 from mnemonic.auth import (
     DUMMY_HASH,
     create_access_token,
@@ -58,9 +59,11 @@ async def register(
     # argon2 is CPU-bound (~50 ms): a worker thread keeps the event loop free for other requests.
     hashed = await asyncio.to_thread(hash_password, body.password)
     try:
-        return await asyncio.to_thread(store.create_user, normalize_email(body.email), hashed)
+        user = await asyncio.to_thread(store.create_user, normalize_email(body.email), hashed)
     except EmailTaken:
         raise HTTPException(status_code=409, detail="Email already registered") from None
+    await events.emit(store, events.SIGNUP, user.id)
+    return user
 
 
 @router.post(

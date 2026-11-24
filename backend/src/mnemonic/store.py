@@ -3,7 +3,7 @@
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Literal, Protocol
 from uuid import UUID
@@ -69,6 +69,7 @@ class IndexRow:
     content: str
 
 
+STATS_DAYS = 7
 DEFAULT_TITLE = "New chat"
 TITLE_FROM_MESSAGE_CHARS = 60
 
@@ -148,6 +149,14 @@ class Store(Protocol):
         ...
 
     def log_llm_call(self, call: LLMCall) -> None: ...
+
+    def log_event(self, name: str, user_id: UUID | None, props: dict) -> None:
+        """Append one product event (see mnemonic.events). Props: small flags, never text."""
+        ...
+
+    def event_stats(self, days: int = STATS_DAYS) -> dict:
+        """Aggregates for /admin/stats: see PgStore.event_stats for the shape."""
+        ...
 
     def get_chunks(self, ids: list[int], owner_id: UUID | None = None) -> list[Chunk]:
         """The chunks among `ids` that `owner_id` may see: shared ones and their own. Unknown
@@ -431,6 +440,13 @@ class PgStore:
             rows = conn.execute("SELECT id, owner_id, heading, content FROM chunks").fetchall()
         return [IndexRow(*row) for row in rows]
 
+    def log_event(self, name: str, user_id: UUID | None, props: dict) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO events (user_id, name, props) VALUES (%s, %s, %s)",
+                (user_id, name, Jsonb(props)),
+            )
+
     def log_llm_call(self, call: LLMCall) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -447,6 +463,89 @@ class PgStore:
                     call.status,
                 ),
             )
+
+    def event_stats(self, days: int = STATS_DAYS) -> dict:
+        """Totals per event name, distinct users, the last `days` days (UTC) per day, the
+        main-action rate and the LLM cost per active user. Missing days and names are zeros."""
+        today = datetime.now(UTC).date()
+        first = today - timedelta(days=days - 1)
+        with self._connect() as conn:
+            totals = dict(conn.execute("SELECT name, count(*) FROM events GROUP BY name"))
+            (distinct_users,) = conn.execute(
+                "SELECT count(DISTINCT user_id) FROM events"
+            ).fetchone()
+            (registered,) = conn.execute("SELECT count(*) FROM users").fetchone()
+            daily = conn.execute(
+                "SELECT (created_at AT TIME ZONE 'UTC')::date, name, count(*) FROM events "
+                "WHERE created_at >= %s GROUP BY 1, 2",
+                (datetime(first.year, first.month, first.day, tzinfo=UTC),),
+            ).fetchall()
+            (cited_users,) = conn.execute(
+                "SELECT count(DISTINCT user_id) FROM events "
+                "WHERE name = 'question_answered' AND props->>'cited' = 'true'"
+            ).fetchone()
+            (active_users,) = conn.execute(
+                "SELECT count(DISTINCT user_id) FROM events WHERE name = 'question_answered'"
+            ).fetchone()
+            cost, calls = conn.execute(
+                "SELECT COALESCE(sum(cost_usd), 0)::float8, count(*) FROM llm_calls"
+            ).fetchone()
+        per_day: dict = {}
+        for day, name, n in daily:
+            per_day.setdefault(day, {})[name] = n
+        return assemble_stats(
+            totals,
+            distinct_users,
+            registered,
+            per_day,
+            cited_users,
+            active_users,
+            cost,
+            calls,
+            today,
+            days,
+        )
+
+
+def assemble_stats(
+    totals: dict[str, int],
+    distinct_users: int,
+    registered: int,
+    per_day: dict,
+    cited_users: int,
+    active_users: int,
+    cost: float,
+    calls: int,
+    today,
+    days: int,
+) -> dict:
+    """The one place that shapes the numbers, shared by PgStore and the in-memory test store.
+
+    Main-action rate = registered users who got at least one CITED answer / registered users."""
+    names = ("signup", "question_answered", "cards_made", "search")
+    last_days = []
+    for back in range(days - 1, -1, -1):
+        day = today - timedelta(days=back)
+        counts = per_day.get(day, {})
+        last_days.append({"date": day.isoformat(), **{n: counts.get(n, 0) for n in names}})
+    return {
+        "totals": {n: totals.get(n, 0) for n in names},
+        "distinct_users": distinct_users,
+        "registered_users": registered,
+        "last_days": last_days,
+        "main_action": {
+            "event": "question_answered",
+            "definition": "a user got at least one cited answer",
+            "users": cited_users,
+            "rate": round(cited_users / registered, 3) if registered else 0.0,
+        },
+        "llm_cost": {
+            "total_usd": round(cost, 6),
+            "calls": calls,
+            "active_users": active_users,
+            "avg_per_active_user_usd": round(cost / active_users, 6) if active_users else 0.0,
+        },
+    }
 
 
 @lru_cache

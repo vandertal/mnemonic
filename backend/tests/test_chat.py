@@ -134,11 +134,26 @@ def test_timeout_is_read_from_env(monkeypatch):
         {"session_id": "not-a-uuid", "message": "hi"},
         {"session_id": str(SESSION), "message": ""},
         {"session_id": str(SESSION), "message": "x" * 2001},
+        {"session_id": str(SESSION), "message": "   \n\t "},  # blank after trimming
+        {"session_id": str(SESSION), "message": "a\u0000b"},  # Postgres text cannot hold NUL
     ],
 )
 def test_chat_rejects_invalid_body(client, body):
     app.dependency_overrides[get_provider] = ScriptedProvider
     assert client.post("/chat", json=body).status_code == 422
+
+
+def test_chat_rejects_a_lone_surrogate_as_422_not_500(client):
+    app.dependency_overrides[get_provider] = ScriptedProvider
+    raw = '{"session_id": "' + str(SESSION) + '", "message": "bad \\ud800 text"}'
+    response = client.post("/chat", content=raw, headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+
+
+def test_chat_accepts_emoji_and_non_latin_text(client):
+    app.dependency_overrides[get_provider] = ScriptedProvider
+    for text in ("Що таке CORS? 🤔", "什么是 CORS", "é ‮ zero​width"):
+        assert client.post("/chat", json=chat_body(text)).status_code == 200
 
 
 # --- RAG: retrieval, threshold, citations, system-prompt safety ---------------------------

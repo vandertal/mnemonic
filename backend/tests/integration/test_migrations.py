@@ -26,11 +26,18 @@ def tables(url: str) -> set[str]:
 
 
 def test_head_has_the_whole_schema(pg_url):
-    assert {"users", "sessions", "messages", "llm_calls", "documents", "chunks"} <= tables(pg_url)
+    assert {"users", "sessions", "messages", "llm_calls", "documents", "chunks", "events"} <= (
+        tables(pg_url)
+    )
     assert {"user_id", "title", "updated_at"} <= columns(pg_url, "sessions")
+    assert {"id", "user_id", "name", "props", "created_at"} == columns(pg_url, "events")
 
 
 def test_down_one_then_up_again(pg_url, pg_cfg):
+    command.downgrade(pg_cfg, "-1")  # 0004 -> 0003: the events table goes
+    assert "events" not in tables(pg_url)
+    assert "user_id" in columns(pg_url, "sessions")
+
     command.downgrade(pg_cfg, "-1")  # 0003 -> 0002: sessions lose their owner
     assert "user_id" not in columns(pg_url, "sessions")
     assert "users" in tables(pg_url)
