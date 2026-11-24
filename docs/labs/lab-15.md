@@ -57,9 +57,21 @@ Index built from DB chunks at startup + incremental updates; RRF fusion; `GET /s
 Check: eval table (vector / BM25 / hybrid) — short queries answered, IDK 3/3 and existing keyword/retrieval scores not worse; Render memory before/after measured.
 Done: gate (c) + `RETRIEVAL_MODE=hybrid` default; table in `docs/labs/lab-15-eval.md` (retrieval 7/7, short 10/10 vs 6/10, off-topic 10/10); ADR `docs/decisions/0005-hybrid-retrieval.md`. Render memory is still to be read from the startup log line after the deploy (after M3).
 
-**M3 — SPA + close.** [ ]
+**M3 — SPA + close.** [x] code and docs done; the deployment checklist below and the tag are pending.
 Search panel with safe highlights and "why this result"; live smoke; README (screenshot, latency, tradeoffs lexical vs semantic, limitations); Reflection; tag `lab-15`.
 Check: live URL, a keyword query returns ranked snippets; Reflection rewritten in own words.
+Done: `/search` screen (`pages/search-page.tsx`, `features/search/`), `renderHighlights` (code points, 13 tests), the shared chunk viewer (`SourceDialog`), explain table, uk + en strings, README "Search" section.
+
+## Deployment checklist (tick after the deploy)
+
+- [ ] PR `lab-15` → `main` merged after green CI (the integration tests run on a real pgvector for the first time)
+- [ ] Render deployed
+- [ ] Startup log line shows chunks / terms / build time / RSS — record: `chunks=____ terms=____ build=____ s rss=____ MB`
+- [ ] Render Metrics → Memory before / after recorded: `before ____ MB → after ____ MB`
+- [ ] `cd backend; uv run python scripts/search_smoke.py <render url>` — all PASS
+- [ ] SPA search works on the live URL (`Depends`, `"dependency injection"`, an emoji query)
+- [ ] Screenshot saved as `docs/screenshots/search.png`
+- [ ] README live URL set (`TODO_LIVE_URL`) and the Render memory row filled in
 
 ## Student tasks
 
@@ -67,4 +79,64 @@ None before M1 (no footage, no accounts). Before M2: check Render → service �
 
 ## Reflection
 
-> Not written yet. Draft at M3 from the real code; the developer rewrites it in own words.
+> **DRAFT written by Claude from the real code. The developer MUST rewrite it in their own words before the defense:
+> you will be asked follow-up questions, and "the assistant wrote it" is not an answer.**
+> Numbers are from `search_cli.py --bench` (159 FastAPI doc files) and `docs/labs/lab-15-eval.md` (2203 chunks).
+
+The brief's questions, answered for *our* engine (`backend/src/mnemonic/search/`):
+
+1. **A word in exactly one document; compare with grep.** The index maps `term → {doc → positions}`
+   (`index.py`), so a lookup is one dict access plus scoring one posting list: p50 about 0.7–1.1 ms on 159 files
+   (bench). `grep -r` re-reads and scans every file for every query, so its cost grows with corpus size; the index
+   pays once at build time (3.4 s for 159 files) and then costs almost nothing per query. Grep also returns lines in
+   file order with no ranking, and cannot say "this word is rare, so this match matters".
+2. **A multi-word query, how the AND happens.** `parse_query` splits the query into terms, phrases and `-excluded`
+   terms (`query.py`). In `engine.py` (`_candidates`) each term becomes the set of doc ids from its posting list;
+   `mode="all"` intersects these sets (`set.intersection`), `mode="any"` unites them, and `-term` subtracts its set.
+   Only the surviving documents are scored. Stop words are removed from the query, so `the cors` is just `cors`.
+3. **TF-IDF in my own words, one result.** Score = sum over query words of *tf × idf*: how often the word is in this
+   chunk, times how rare it is across all chunks (`log(N/df)`). BM25 (our default, `ranking.py`) changes two things:
+   tf saturates (the 10th repeat adds far less than the 2nd) and the chunk length is normalised (k1=1.5, b=0.75),
+   so a long release-notes chunk does not win just by being long. Concrete example for the defense: run
+   `search_cli.py --explain 1` (or the "Why this result?" row in the SPA) for `Depends` and read tf, df, idf and
+   the contribution of the first hit; the contributions add up to the score exactly (a unit test pins this).
+4. **No stop-word filter, demonstrate.** Words like `the`, `is`, `to` are in nearly every chunk: their idf is close
+   to 0, but they still bloat the index (huge posting lists), slow `mode="all"` intersections, and with tf-idf on a
+   small corpus they add noise. Demo: remove the words from `stopwords.py`, rebuild, compare the index size and the
+   query `how to use the` in the CLI. Our stop-word handling keeps *positions* advancing, so phrases stay correct.
+5. **Where it breaks.** *Empty document:* `add_document` stores length 0 and no postings; it never matches, and
+   BM25's `dl/avgdl` is safe while `avgdl > 0` (the engine returns `[]` when `N == 0`). *Same name twice:*
+   `add_document` with an existing id first removes the old version (replace, not duplicate); in the app the ids are
+   database chunk ids, which are unique, and identical content is de-duplicated by `content_hash`. *Only stop words:*
+   `has_positive` is false, so `search` returns `[]` instead of everything. Known weak spot: `python` alone is refused
+   by the chat gate by design.
+6. **Indexing pipeline for one document.** Upload → `ingest` splits it into chunks → embeddings are stored in
+   Postgres → after the DB commit, `SearchService` calls `add_document(str(chunk_id), text)` → `tokenize` (casefold,
+   `\w+`, code-aware: `response_model` becomes the whole token and its parts at the same position; stop words dropped but
+   positions kept) → postings and lengths updated → the text and word starts are kept for snippets. At startup the same
+   path rebuilds everything from the `chunks` table (about 2.5 s for 2203 chunks).
+7. **Hardest bug.** *(Write your own: which bug cost you the most time? Candidates from the history: highlight offsets
+   shifting after an emoji — code points vs UTF-16; the lexical gate answering `python`; keeping the index consistent
+   when a DB write fails.)*
+8. **One billion documents.** The in-memory dict index does not fit. First change: shard the index by term range or
+   document range across machines and keep postings on disk with compression (delta + variable-byte), build it in
+   batches and merge segments (the Lucene way), and score only the top of each posting list. Then caching of popular
+   queries and a two-stage ranker (cheap BM25 recall, expensive rerank). Our single-process, rebuilt-on-restart design
+   is exactly what stops working first.
+
+**Extra, specific to our work — defense questions (answer in your own words):**
+
+- **Why BM25 over TF-IDF?** Both are implemented and selectable (`ranker=`). BM25 saturates tf and normalises length;
+  our chunks vary a lot in length (release notes vs short sections), and plain TF-IDF favours long chunks with many
+  repeats. TF-IDF stays as a baseline that is easy to explain. Be ready to show one query where they order results
+  differently.
+- **Why RRF?** Cosine similarity (0–1) and BM25 (unbounded) are on different scales. RRF uses only ranks:
+  `score = Σ 1 / (60 + rank)`, so no calibration is needed and it does not break when the corpus changes. The cost: it
+  ignores *how much* better rank 1 is than rank 2. Measured effect: fusion alone did not fix refusals; the lexical gate
+  did (6/10 → 10/10 short queries answered, off-topic still 10/10).
+- **How is ownership enforced in search?** In four layers. (1) The index is global, but `SearchService.allowed_ids`
+  = cached shared chunk ids + the caller's chunk ids read from the DB, and the engine filters candidates BEFORE
+  ranking. (2) Lexical-only hits are fetched from the DB with the ownership filter repeated in SQL. (3) `/search` calls
+  `store.get_chunks(ids, user.id)` and drops anything the DB does not return. (4) `/search/explain` answers 404 for a
+  foreign chunk, identical to a missing one, so ids cannot be probed. Tests: `tests/test_search_api.py` (ownership
+  matrix) and `tests/integration/test_pg_search.py` (real Postgres).

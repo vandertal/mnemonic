@@ -91,4 +91,5 @@ npm run dev       # runs the API preflight first
 npm run doctor    # only the preflight: is VITE_API_URL reachable and the right API?
 npm run test      # vitest
 npx tsc -b ; npx oxlint ; npm run build
+# search screen: /search in the SPA (after login); backend smoke: cd backend; uv run python scripts/search_smoke.py <API URL>
 ```
