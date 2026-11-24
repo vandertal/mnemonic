@@ -5,6 +5,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from mnemonic.llm.base import Usage, parse_json_with_retry
+from mnemonic.llm.errors import LLMBlocked
 from mnemonic.schemas import Message, ToolCall, ToolSpec
 
 
@@ -53,6 +54,28 @@ def response_schema(schema: type[BaseModel]) -> dict:
 DOC_ONLY_KEYS = {"examples", "example"}
 
 
+# finish_reason values that mean "the provider refused", not "the answer is complete".
+_BLOCKED_REASONS = {
+    "SAFETY",
+    "PROHIBITED_CONTENT",
+    "BLOCKLIST",
+    "SPII",
+    "RECITATION",
+    "IMAGE_SAFETY",
+}
+
+
+def check_not_blocked(chunk: types.GenerateContentResponse) -> None:
+    """Raise LLMBlocked when the prompt or the answer was stopped by the safety policy."""
+    feedback = chunk.prompt_feedback
+    if feedback is not None and feedback.block_reason is not None:
+        raise LLMBlocked(f"prompt blocked: {feedback.block_reason}")
+    for candidate in chunk.candidates or []:
+        reason = candidate.finish_reason
+        if reason is not None and getattr(reason, "name", str(reason)) in _BLOCKED_REASONS:
+            raise LLMBlocked(f"answer stopped: {getattr(reason, 'name', reason)}")
+
+
 class GeminiProvider:
     supports_tools = True
 
@@ -81,6 +104,7 @@ class GeminiProvider:
             model=self._model, contents=contents, config=config
         )
         async for chunk in response:
+            check_not_blocked(chunk)
             meta = chunk.usage_metadata
             if usage is not None and meta is not None:
                 usage.tokens_in = meta.prompt_token_count
@@ -107,6 +131,7 @@ class GeminiProvider:
             model=self._model, contents=contents, config=config
         )
         async for chunk in response:
+            check_not_blocked(chunk)
             meta = chunk.usage_metadata
             if usage is not None and meta is not None:
                 # Counts are cumulative: the last chunk holds the totals. "Thinking" tokens

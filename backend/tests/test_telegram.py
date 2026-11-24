@@ -16,6 +16,8 @@ from mnemonic import routes_telegram
 from mnemonic.auth import verify_password
 from mnemonic.config import Settings, get_settings
 from mnemonic.limits import SlidingWindowLimiter
+from mnemonic.llm import errors as llm_errors
+from mnemonic.llm import retry
 from mnemonic.llm.fake import FakeProvider
 from mnemonic.main import app, get_provider, get_retriever, get_store
 from mnemonic.rag import REFUSAL
@@ -33,6 +35,7 @@ from mnemonic.telegram_bot import (
     NEW_CHAT,
     NO_CARDS,
     NO_CARDS_REFUSED,
+    NON_ENGLISH_HINT,
     TEXT_ONLY,
     TOO_LONG,
     Button,
@@ -688,6 +691,35 @@ def test_a_model_failure_while_making_cards_is_a_friendly_sentence(store, api):
     assert api.texts[-1] == esc(ERR_CARDS)
 
 
+def test_a_quota_failure_says_so_in_the_bot(store, api, monkeypatch):
+    class Quota(Exception):
+        code = 429
+
+    class Both(RecordingProvider):
+        async def generate_json(self, messages, schema, usage=None):
+            raise Quota()
+
+    async def instant(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(retry, "_sleep", instant)  # no real backoff between the 429 retries
+    bot = make_bot(store, api, provider=Both("ok [1]"))
+    asyncio.run(bot.handle_update(message("q")))
+    asyncio.run(bot.handle_update(message("/cards")))
+    assert "quota" in api.texts[-1]
+
+
+def test_a_russian_question_gets_the_english_hint_and_no_llm_call(store, api):
+    provider = RecordingProvider("never")
+    bot = make_bot(store, api, provider=provider)
+    asyncio.run(bot.handle_update(message("Как работает Depends?")))
+    assert api.texts[-1] == esc(NON_ENGLISH_HINT)
+    assert provider.calls == []
+    assert store.llm_calls == []
+    refused = [p for n, _, p, _ in store.events if n == "question_answered"]
+    assert refused[-1]["refused"] is True and refused[-1]["reason"] == "non_english"
+
+
 # ---------- limits and errors ----------
 
 
@@ -731,7 +763,12 @@ def test_a_provider_error_is_a_friendly_sentence_and_not_logged_with_the_questio
     assert "my very private question" not in api.texts[0]
 
 
-def test_a_timeout_is_a_friendly_sentence(store, api):
+def test_a_timeout_is_a_friendly_sentence(store, api, monkeypatch):
+    async def instant(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(retry, "_sleep", instant)
+
     class Hanging(RecordingProvider):
         async def stream(self, messages, usage=None):
             await asyncio.sleep(60)
@@ -740,7 +777,7 @@ def test_a_timeout_is_a_friendly_sentence(store, api):
     bot = make_bot(store, api, provider=Hanging())
     bot.settings = Settings(_env_file=None, similarity_threshold=0.5, llm_timeout_seconds=0.05)
     asyncio.run(bot.handle_update(message("q")))
-    assert api.texts == [esc(ERR_MODEL)]
+    assert api.texts == [esc(llm_errors.MESSAGES["timeout"])]
 
 
 # ---------- events ----------

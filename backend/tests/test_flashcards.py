@@ -77,7 +77,8 @@ def test_invalid_json_is_retried_once_then_502(store):
     with make_client(store, provider) as client:
         response = post(client)
     assert response.status_code == 502
-    assert "wrong format" in response.json()["detail"]
+    assert "invalid output" in response.json()["detail"]
+    assert store.llm_calls[0].error_class == "invalid_output"
     assert provider.json_calls == 2  # the first try + exactly one repeat
     assert [c.status for c in store.llm_calls] == ["error+est"]
 

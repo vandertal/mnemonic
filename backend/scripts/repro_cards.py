@@ -1,4 +1,5 @@
 """Dev-only: call the real model the way make_flashcards does (one call, prints the raw failure)."""
+
 import asyncio
 import logging
 
