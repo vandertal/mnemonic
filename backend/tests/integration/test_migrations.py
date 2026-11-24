@@ -42,6 +42,11 @@ def test_head_has_the_whole_schema(pg_url):
 
 
 def test_down_one_then_up_again(pg_url, pg_cfg):
+    assert "error_class" in columns(pg_url, "llm_calls")
+    command.downgrade(pg_cfg, "-1")  # 0006 -> 0005: llm_calls loses error_class
+    assert "error_class" not in columns(pg_url, "llm_calls")
+    assert "telegram_accounts" in tables(pg_url)
+
     command.downgrade(pg_cfg, "-1")  # 0005 -> 0004: the Telegram link table goes
     assert "telegram_accounts" not in tables(pg_url)
     assert "events" in tables(pg_url)
