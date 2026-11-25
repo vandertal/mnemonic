@@ -49,7 +49,7 @@ What Mnemonic will not do ([docs/PRODUCT.md](docs/PRODUCT.md), the ADRs):
 
 > 42
 
-Web: TODO_STUDENT: live Cloudflare URL · Telegram: TODO_STUDENT: `https://t.me/<bot username>` · API: https://mnemonic-y1js.onrender.com · Code: https://github.com/vandertal/mnemonic
+Web: https://mnemonic.vlad-slv.workers.dev · Telegram: https://t.me/mnemonicus_bot · API: https://mnemonic-y1js.onrender.com · Code: https://github.com/vandertal/mnemonic
 
 <!-- TODO_STUDENT: sign it (name, date). -->
 — Vladislav

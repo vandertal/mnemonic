@@ -4,9 +4,8 @@
 
 [![CI](https://github.com/vandertal/mnemonic/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 
-**Try it:** [Web app](TODO_STUDENT) · [Telegram bot](TODO_STUDENT) · [API docs](https://mnemonic-y1js.onrender.com/docs) · [Health](https://mnemonic-y1js.onrender.com/health)
+**Try it:** [Web app](https://mnemonic.vlad-slv.workers.dev) · [Telegram bot](https://t.me/mnemonicus_bot) · [API docs](https://mnemonic-y1js.onrender.com/docs) · [Health](https://mnemonic-y1js.onrender.com/health)
 
-<!-- TODO_STUDENT: replace both TODO_STUDENT links above: the live Cloudflare URL and https://t.me/<bot username> -->
 
 An AI study assistant: pick a ready knowledge base or upload your own files, ask questions, and get answers that cite
 their sources (or honestly say "I don't know"), then turn them into flashcards.
@@ -379,7 +378,7 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 
 ### Deployment checklist (lab 21 brief)
 
-- [ ] API live at a public URL — the lab-21 code is not deployed yet (`TODO_LIVE_URL`).
+- [x] API live at a public URL: https://mnemonic-y1js.onrender.com
 - [x] OpenAPI / Swagger UI at `/docs` (in code; live once deployed).
 - [x] `curl` examples in this README, including auth.
 - [x] Secrets (DB URL, JWT secret) only in environment variables, not in code.
@@ -425,10 +424,8 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 - **Multipart is parsed before the auth check** on `POST /documents` (the framework reads the form first).
 - **English-only embedder**; short one- or two-word questions may fall under the similarity threshold.
 - **The calculator only works after retrieval passes** (the "I don't know" gate runs first).
-- **The knowledge base and the embedder are English.** The example questions are English on purpose. A question that is
-  mostly non-Latin text (Russian, Ukrainian, CJK, ...) is refused up front with the hint "Ask in English" (reason
-  `non_english`, no embedding and no LLM call). A question in another Latin-script language (German, Polish, ...) is not
-  detected and may still end in "I don't know". The UI is fully localized.
+- **The knowledge base and the embedder are English.** The example questions are English on purpose; a question in
+  Ukrainian may be refused because its embedding does not match the English chunks. The UI is fully localized.
 - **No real-user evidence yet.** The metric and the feedback write-up exist as machinery; the numbers come after the
   first users (lab 34, M3).
 - **Link previews are English only.** The `og:` tags are static in `index.html` (crawlers do not run JavaScript).
@@ -438,12 +435,9 @@ Result: no download at runtime, the first question only pays the ~1 s model load
 - **Memory on the free Render plan (512 MB).** One out-of-memory restart was observed on the first Telegram message
   during a cold start (the embedding model loads on the first question). Not reproduced or fixed; the memory numbers
   above are local measurements, the Render ones are still to be read from Render Metrics.
-- **Free-tier Gemini is flaky.** A stream can fail mid-answer (429 quota, 503 overload). The server classifies the error,
-  retries the stream once on its own (the client drops the partial text) and then shows a specific message; what really
-  fails is counted in `GET /admin/stats` (`llm_errors_by_class`). A second failure still ends in an error with a
-  "Try again" button. Design: [ADR 0008](docs/decisions/0008-llm-resilience.md).
-- **Flashcards were broken for everyone (fixed).** The OpenAPI `examples` on the flashcard model made the Gemini SDK
-  reject the request locally; fixed in `llm/gemini.py` (row 34 of [lab-34-failures.md](docs/labs/lab-34-failures.md)).
+- **Telegram `/cards` is unreliable in a real chat (open bug).** In a real chat the bot answered that the model could not
+  make flashcards (the 502 sentence). The web's "Make flashcards" calls the same `make_flashcards` function, so the
+  difference is not in the logic; the cause is not found yet (details: [lab-34-failures.md](docs/labs/lab-34-failures.md), row 32).
 - Failure behaviour (offline, cold start, 429, cut streams, weird input): [docs/labs/lab-34-failures.md](docs/labs/lab-34-failures.md).
 
 ## Privacy and ethics
